@@ -1,0 +1,11 @@
+{
+  "display_name": "预设悬浮球",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "dist/index.js",
+  "author": "Nancyindaeyo",
+  "version": "0.1.0",
+  "homePage": "https://github.com/Nancyindaeyo/preset-ball",
+  "auto_update": false
+}
