@@ -19,18 +19,9 @@ interface PromptManager {
   };
   getPromptOrderEntry?: (character: unknown, identifier: string) => OrderEntry | undefined;
   getPromptOrderForCharacter?: (character: unknown) => OrderEntry[] | undefined;
-  renderPromptManagerListItems?: () => Promise<void> | void;
-  calculateContextTokens?: (force?: boolean) => void;
 }
 
 let pmCache: PromptManager | null = null;
-let persistTimer: number | null = null;
-const listeners = new Set<() => void>();
-
-export function onPromptPersist(fn: () => void): () => void {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
 
 async function loadPm(): Promise<PromptManager | null> {
   if (pmCache?.getPromptOrderEntry) return pmCache;
@@ -101,6 +92,7 @@ async function setEnabled(identifier: string, enabled: boolean): Promise<boolean
   return true;
 }
 
+/** 只改内存里的 prompt_order，不刷新官方列表、不触发全量保存。 */
 export async function applyNamedEnabled(
   changes: Array<{ name: string; enabled: boolean }>,
 ): Promise<{ missing: string[]; changed: number }> {
@@ -110,7 +102,6 @@ export async function applyNamedEnabled(
   for (const c of changes) {
     const hit = findInStates(states, c.name);
     if (!hit) {
-      // 当前角色顺序里没有：要关等于本来就关，不报；要开才算缺
       if (c.enabled) missing.push(c.name);
       continue;
     }
@@ -120,63 +111,17 @@ export async function applyNamedEnabled(
       changed += 1;
     }
   }
-  schedulePersist();
   return { missing, changed };
 }
 
-export async function snapshotByName(): Promise<Record<string, boolean>> {
-  const states = await getNamedStates();
-  const out: Record<string, boolean> = {};
-  for (const s of states) {
-    const key = s.name || s.identifier;
-    if (key in out) out[`${key}#${s.identifier}`] = s.enabled;
-    else out[key] = s.enabled;
-  }
-  return out;
-}
-
-function schedulePersist(): void {
-  if (persistTimer) window.clearTimeout(persistTimer);
-  persistTimer = window.setTimeout(() => {
-    void persist();
-  }, 60);
-}
-
-async function persist(): Promise<void> {
-  const pm = await loadPm();
-  try {
-    if (pm && typeof pm.renderPromptManagerListItems === 'function') {
-      await pm.renderPromptManagerListItems();
-    }
-  } catch {
-    /* 官方列表刷新失败不阻断保存 */
-  }
-  try {
-    pm?.calculateContextTokens?.(true);
-  } catch {
-    /* token 刷新失败可忽略 */
-  }
+/** 把当前设置写进酒馆。不重绘官方预设列表，避免和原生编辑互抢。 */
+export async function commitHostWrites(): Promise<void> {
   const script = await importHost<{ saveSettings?: () => void; saveSettingsDebounced?: () => void }>(
     '/script.js',
   );
   try {
     script?.saveSettingsDebounced?.() ?? script?.saveSettings?.();
   } catch {
-    /* 由调用方 toast */
+    /* 由调用方提示 */
   }
-  listeners.forEach(fn => {
-    try {
-      fn();
-    } catch {
-      /* ignore */
-    }
-  });
-}
-
-export async function flushPromptPersist(): Promise<void> {
-  if (persistTimer) {
-    window.clearTimeout(persistTimer);
-    persistTimer = null;
-  }
-  await persist();
 }

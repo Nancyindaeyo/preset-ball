@@ -1,3 +1,4 @@
+import { dirty, pullFromHost } from '@/state/store';
 import { reactive } from 'vue';
 
 export type View =
@@ -17,9 +18,11 @@ export const ui = reactive({
 export function openSheet(): void {
   ui.sheet = true;
   ui.view = { name: 'home' };
+  void pullFromHost();
 }
 
 export function closeSheet(): void {
+  if (dirty.value && !window.confirm('改动还没写进酒馆，关掉会丢掉。确定关？')) return;
   ui.sheet = false;
   ui.view = { name: 'home' };
 }

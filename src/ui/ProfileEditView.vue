@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { snapshotByName } from '@/host/prompts';
 import {
   commitProfileDraft,
   persistSettings,
@@ -28,8 +27,8 @@ onMounted(async () => {
   loreSync.value = Boolean(p.loreSync);
   loreWorlds.value = [...(p.loreWorlds ?? [])];
   rows.value = await promptRows();
-  const snap = await snapshotByName();
-  const next = { ...snap };
+  const next: Record<string, boolean> = {};
+  for (const row of rows.value) next[row.name] = row.enabled;
   if (p.kind === 'full' && p.entries) Object.assign(next, p.entries);
   else {
     for (const n of p.enable ?? []) next[n] = true;
@@ -82,7 +81,7 @@ function onDelete(): void {
 <template>
   <p v-if="!profile" class="pb-empty">找不到这个方案。</p>
   <template v-else>
-    <p class="pb-hint">这里改的是方案草稿，点保存之前不会动当前预设。</p>
+    <p class="pb-hint">这里改的是方案草稿。点保存之前不会动酒馆。系统槽默认收着。</p>
     <input v-model="name" class="pb-input" placeholder="方案名字" />
     <label class="pb-row">
       <span class="ttl">
@@ -114,7 +113,7 @@ function onDelete(): void {
       <span class="ttl">显示系统槽 / 分隔线</span>
       <input v-model="showSystem" type="checkbox" />
     </label>
-    <details v-for="[folder, list] in folders" :key="folder" class="pb-folder" open>
+    <details v-for="[folder, list] in folders" :key="folder" class="pb-folder">
       <summary>{{ folder }}（{{ list.length }}）</summary>
       <button
         v-for="row in list"
@@ -131,10 +130,12 @@ function onDelete(): void {
         <span class="pb-switch" :class="{ 'is-on': on(row.name) }" />
       </button>
     </details>
-    <div class="pb-actions">
-      <button class="pb-btn" type="button" @click="save(false)">只保存</button>
-      <button class="pb-btn primary" type="button" @click="save(true)">保存并套用</button>
+    <div class="pb-foot">
+      <div class="pb-actions">
+        <button class="pb-btn" type="button" @click="save(false)">只保存</button>
+        <button class="pb-btn primary" type="button" @click="save(true)">保存并套用</button>
+      </div>
+      <button class="pb-btn danger pb-delete" type="button" @click="onDelete">删除这个方案</button>
     </div>
-    <button class="pb-btn danger pb-delete" type="button" @click="onDelete">删除这个方案</button>
   </template>
 </template>

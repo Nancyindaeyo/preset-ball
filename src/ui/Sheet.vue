@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { closeSheet, back, ui } from '@/state/ui';
+import { dirty, saveDraftAndApply, saveDraftOnly } from '@/state/store';
 import HomeView from '@/ui/HomeView.vue';
 import ProfileEditView from '@/ui/ProfileEditView.vue';
 import RuleEditView from '@/ui/RuleEditView.vue';
@@ -49,5 +50,12 @@ const nested = computed(() => ui.view.name !== 'home');
       <FineTuneView v-else-if="ui.view.name === 'fine'" />
       <LorePickView v-else-if="ui.view.name === 'lore-pick'" />
     </div>
+    <footer v-if="ui.view.name === 'home'" class="pb-foot">
+      <p class="pb-hint">{{ dirty ? '上面改的还没写进酒馆。' : '打开时已读入当前预设。改完再保存。' }}</p>
+      <div class="pb-actions">
+        <button class="pb-btn" type="button" @click="saveDraftOnly">只保存</button>
+        <button class="pb-btn primary" type="button" @click="saveDraftAndApply">保存并套用</button>
+      </div>
+    </footer>
   </section>
 </template>

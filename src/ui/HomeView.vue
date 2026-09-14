@@ -3,13 +3,13 @@ import { HOME_SECTIONS } from '@/catalog/groups';
 import {
   JAILBREAK_TIERS,
   applyPack,
-  applyProfile,
   bindCurrentChat,
   getGlobalWorlds,
   isOn,
   jailbreakLevel,
   packClash,
   packIsOn,
+  previewProfile,
   readBinding,
   removeLoreShortcut,
   removeProfile,
@@ -98,6 +98,10 @@ function confirmDelete(p: Profile): void {
   removeProfile(p.id);
 }
 
+async function tapProfile(p: Profile): Promise<void> {
+  await previewProfile(p);
+}
+
 function saveNew(): void {
   const name = window.prompt('给这个方案起个名', '未命名方案');
   if (name == null) return;
@@ -133,9 +137,9 @@ function ethicsLabel(name: string): string {
 
   <section class="pb-block">
     <h2>方案</h2>
-    <p class="pb-hint">点名字立刻套用。点「改」可以开关每一条再保存。</p>
+    <p class="pb-hint">点名字先预览。底部「保存并套用」才写进酒馆。「只保存」只记进方案。</p>
     <div v-for="p in settings.profiles" :key="p.id" class="pb-card" :class="{ 'is-on': settings.activeProfileId === p.id }">
-      <button class="pb-card-hit" type="button" @click="applyProfile(p)">
+      <button class="pb-card-hit" type="button" @click="tapProfile(p)">
         <span class="ttl">
           {{ p.name }}
           <small>{{ p.kind === 'patch' ? '起步模板，只改列出的条目' : '完整快照' }}</small>

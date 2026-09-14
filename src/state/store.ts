@@ -1,15 +1,14 @@
 import { FACTORY_PROFILES, FACTORY_RULES, JAILBREAK_TIERS } from '@/catalog/factory';
 import { folderOf, isDivider, isReceiver, isSystemName } from '@/catalog/folders';
-import { N, NSFW_STYLES } from '@/catalog/names';
+import { N } from '@/catalog/names';
 import { detectWarnings } from '@/catalog/warnings';
 import { getContext, toast } from '@/host/context';
 import { onHostEvent } from '@/host/events';
 import {
   applyNamedEnabled,
+  commitHostWrites,
   findInStates,
-  flushPromptPersist,
   getNamedStates,
-  snapshotByName,
   type NamedState,
 } from '@/host/prompts';
 import { getGlobalWorlds, listWorldNames, replaceGlobalWorlds, setGlobalWorld } from '@/host/worldinfo';
@@ -41,9 +40,11 @@ export const states = ref<NamedState[]>([]);
 export const warnings = ref<Warning[]>([]);
 export const applying = ref(false);
 export const ready = ref(false);
+export const dirty = ref(false);
 
 let writeGate = false;
 let applyLock = false;
+const baseline = new Map<string, boolean>();
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
@@ -90,12 +91,37 @@ export function hydrateSettings(): void {
   const next = mergeFactory(stored && typeof stored === 'object' ? (stored as Partial<Settings>) : undefined);
   Object.assign(settings, next);
   writeGate = true;
-  persistSettings();
+  if (!stored) persistSettings();
+}
+
+function rememberBaseline(): void {
+  baseline.clear();
+  for (const s of states.value) baseline.set(s.identifier, s.enabled);
+  dirty.value = false;
+}
+
+function markDirty(): void {
+  dirty.value = states.value.some(s => baseline.get(s.identifier) !== s.enabled);
+}
+
+function snapshotLocal(): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const s of states.value) {
+    const key = s.name || s.identifier;
+    if (key in out) out[`${key}#${s.identifier}`] = s.enabled;
+    else out[key] = s.enabled;
+  }
+  return out;
+}
+
+export async function pullFromHost(): Promise<void> {
+  states.value = await getNamedStates();
+  warnings.value = detectWarnings(states.value, settings.rules);
+  rememberBaseline();
 }
 
 export async function refreshStates(): Promise<void> {
-  states.value = await getNamedStates();
-  warnings.value = detectWarnings(states.value, settings.rules);
+  await pullFromHost();
 }
 
 function lastWins(changes: Array<{ name: string; enabled: boolean }>): Array<{ name: string; enabled: boolean }> {
@@ -114,8 +140,44 @@ export function isOn(name: string): boolean {
 
 export async function setNames(changes: Array<{ name: string; enabled: boolean }>): Promise<string[]> {
   if (!changes.length) return [];
-  const { missing } = await applyNamedEnabled(changes);
-  await refreshStates();
+  if (!states.value.length) await pullFromHost();
+  const missing: string[] = [];
+  const next = states.value.map(s => ({ ...s }));
+  for (const c of lastWins(changes)) {
+    const hit = findInStates(next, c.name);
+    if (!hit) {
+      if (c.enabled) missing.push(c.name);
+      continue;
+    }
+    hit.enabled = c.enabled;
+  }
+  states.value = next;
+  warnings.value = detectWarnings(states.value, settings.rules);
+  markDirty();
+  if (missing.length) {
+    toast('warn', `这几条在当前预设里找不到：${missing.slice(0, 4).join('、')}${missing.length > 4 ? '…' : ''}`);
+  }
+  return missing;
+}
+
+function hostDiffs(): Array<{ name: string; enabled: boolean }> {
+  const out: Array<{ name: string; enabled: boolean }> = [];
+  for (const s of states.value) {
+    if (baseline.get(s.identifier) !== s.enabled) out.push({ name: s.name, enabled: s.enabled });
+  }
+  return out;
+}
+
+export async function pushToHost(): Promise<string[]> {
+  if (!states.value.length) await pullFromHost();
+  const diffs = hostDiffs();
+  if (!diffs.length) {
+    dirty.value = false;
+    return [];
+  }
+  const { missing } = await applyNamedEnabled(diffs);
+  await commitHostWrites();
+  rememberBaseline();
   if (missing.length) {
     toast('warn', `这几条在当前预设里找不到：${missing.slice(0, 4).join('、')}${missing.length > 4 ? '…' : ''}`);
   }
@@ -188,23 +250,50 @@ export async function applyPack(rule: Rule, turnOn: boolean): Promise<void> {
   await setNames(lastWins(changes));
 }
 
+export function loadProfileToDraft(profile: Profile): string[] {
+  const next = states.value.map(s => ({ ...s }));
+  const missing: string[] = [];
+  if (profile.kind === 'full' && profile.entries) {
+    for (const [name, enabled] of Object.entries(profile.entries)) {
+      const hit = findInStates(next, name);
+      if (!hit) {
+        if (enabled) missing.push(name);
+        continue;
+      }
+      hit.enabled = enabled;
+    }
+  } else {
+    for (const n of profile.enable ?? []) {
+      const hit = findInStates(next, n);
+      if (hit) hit.enabled = true;
+      else missing.push(n);
+    }
+    for (const n of profile.disable ?? []) {
+      const hit = findInStates(next, n);
+      if (hit) hit.enabled = false;
+    }
+  }
+  states.value = next;
+  warnings.value = detectWarnings(states.value, settings.rules);
+  settings.activeProfileId = profile.id;
+  persistSettings();
+  markDirty();
+  return missing;
+}
+
+export async function previewProfile(profile: Profile): Promise<void> {
+  if (!states.value.length) await pullFromHost();
+  loadProfileToDraft(profile);
+}
+
 export async function applyProfile(profile: Profile, opts?: { skipLore?: boolean }): Promise<void> {
   if (applyLock) return;
   applyLock = true;
   applying.value = true;
   try {
-    const changes: Array<{ name: string; enabled: boolean }> = [];
-    if (profile.kind === 'full' && profile.entries) {
-      for (const [name, enabled] of Object.entries(profile.entries)) {
-        changes.push({ name, enabled });
-      }
-    } else {
-      for (const n of profile.enable ?? []) changes.push({ name: n, enabled: true });
-      for (const n of profile.disable ?? []) changes.push({ name: n, enabled: false });
-    }
-    const missing = await setNames(changes);
-    settings.activeProfileId = profile.id;
-    persistSettings();
+    if (!states.value.length) await pullFromHost();
+    const missing = loadProfileToDraft(profile);
+    await pushToHost();
     if (profile.loreSync && profile.loreWorlds?.length && !opts?.skipLore) {
       await replaceGlobalWorlds(profile.loreWorlds);
     }
@@ -215,9 +304,9 @@ export async function applyProfile(profile: Profile, opts?: { skipLore?: boolean
   }
 }
 
-export async function saveSnapshotTo(profile: Profile): Promise<void> {
+export function saveSnapshotTo(profile: Profile): void {
   profile.kind = 'full';
-  profile.entries = await snapshotByName();
+  profile.entries = snapshotLocal();
   profile.enable = undefined;
   profile.disable = undefined;
   profile.updatedAt = Date.now();
@@ -230,12 +319,36 @@ export function addProfileFromCurrent(name: string): Profile {
     name: name.trim() || '未命名方案',
     kind: 'full',
     updatedAt: Date.now(),
-    entries: {},
+    entries: snapshotLocal(),
   };
   settings.profiles.push(p);
-  void saveSnapshotTo(p).then(() => toast('ok', `已保存方案「${p.name}」`));
+  settings.activeProfileId = p.id;
   persistSettings();
+  toast('ok', `已保存方案「${p.name}」`);
   return p;
+}
+
+export function saveDraftOnly(): void {
+  if (settings.activeProfileId) {
+    const p = settings.profiles.find(x => x.id === settings.activeProfileId);
+    if (p) {
+      saveSnapshotTo(p);
+      toast('ok', `已保存「${p.name}」，还没写进酒馆`);
+      return;
+    }
+  }
+  const name = window.prompt('给这个方案起个名', '未命名方案');
+  if (name == null) return;
+  addProfileFromCurrent(name);
+}
+
+export async function saveDraftAndApply(): Promise<void> {
+  const missing = await pushToHost();
+  if (settings.activeProfileId) {
+    const p = settings.profiles.find(x => x.id === settings.activeProfileId);
+    if (p) saveSnapshotTo(p);
+  }
+  toast('ok', missing.length ? `已写进酒馆，有 ${missing.length} 条当前预设没有` : '已写进酒馆');
 }
 
 export function duplicateProfile(src: Profile, name: string): Profile {
@@ -295,7 +408,7 @@ export async function commitProfileDraft(
   profile.updatedAt = Date.now();
   persistSettings();
   if (applyNow) await applyProfile(profile);
-  else toast('ok', `已保存「${profile.name}」`);
+  else toast('ok', `已保存「${profile.name}」，还没写进酒馆`);
 }
 
 export function upsertRule(rule: Rule): void {
@@ -455,21 +568,12 @@ export function bindHostEvents(): void {
     lastChat = id;
     void applyBoundIfAny();
   });
-  onHostEvent('OAI_PRESET_CHANGED_AFTER', () => {
-    window.setTimeout(() => void refreshStates(), 280);
-  });
-  onHostEvent('CHAT_LOADED', () => {
-    window.setTimeout(() => void refreshStates(), 120);
-  });
 }
 
 export async function bootStore(): Promise<void> {
   hydrateSettings();
   lastChat = getContext()?.getCurrentChatId?.() ?? '';
-  await refreshStates();
   bindHostEvents();
   await applyBoundIfAny();
   ready.value = true;
 }
-
-export { flushPromptPersist };

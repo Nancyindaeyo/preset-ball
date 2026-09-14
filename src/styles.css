@@ -189,11 +189,26 @@
   border-color: color-mix(in srgb, var(--pb-danger) 45%, var(--pb-line));
 }
 
-.pb-body {
-  overflow: auto;
-  padding: 0 14px 16px;
-  flex: 1;
-  -webkit-overflow-scrolling: touch;
+.pb-foot {
+  flex: none;
+  padding: 8px 14px max(10px, env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--pb-line);
+  background: var(--pb-fill);
+}
+
+.pb-body .pb-foot {
+  position: sticky;
+  bottom: -16px;
+  margin: 12px -14px -16px;
+  z-index: 3;
+}
+
+.pb-foot .pb-hint {
+  margin-bottom: 8px;
+}
+
+.pb-foot .pb-actions {
+  margin-top: 0;
 }
 
 .pb-block {
