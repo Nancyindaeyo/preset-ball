@@ -1,6 +1,6 @@
 # 预设悬浮球
 
-SillyTavern / TauriTavern 第三方扩展。给蛾摩拉 2.6 做方案切换、NSFW/伦理/破限叠加、聊天绑定和全局世界书快捷挂载。
+SillyTavern / TauriTavern 第三方扩展。给自用预设做方案切换、NSFW/伦理/破限叠加、聊天绑定和全局世界书快捷挂载。
 
 手机 / TT iOS 底部面板为主，颜色跟酒馆当前美化走。
 
@@ -10,7 +10,7 @@ SillyTavern / TauriTavern 第三方扩展。给蛾摩拉 2.6 做方案切换、N
 2. 或把本仓库放到 `public/scripts/extensions/third-party/preset-ball`
 3. 启用扩展。右下角会出现圆球。
 
-需要当前加载的是 Chat Completion 预设（蛾摩拉 2.6 最完整）。快捷包按条目名匹配；换别的预设时方案快照仍可用，出厂快捷找不到的条目会跳过并提示。
+需要当前加载的是 Chat Completion 预设。快捷包按条目名匹配；换别的预设时方案快照仍可用，出厂快捷找不到的条目会跳过并提示。
 
 ## 开发
 
