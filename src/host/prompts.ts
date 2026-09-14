@@ -77,6 +77,27 @@ export async function getNamedStates(): Promise<NamedState[]> {
   });
 }
 
+function hashText(text: string): string {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(36);
+}
+
+/** 当前 Chat Completion 预设名。读不到就用条目名指纹。 */
+export async function getPresetLabel(states?: NamedState[]): Promise<string> {
+  const mod = await importHost<{
+    oai_settings?: { preset_settings_openai?: string; preset_name?: string };
+    promptManager?: PromptManager;
+  }>('/scripts/openai.js');
+  const fromSettings =
+    mod?.oai_settings?.preset_settings_openai ||
+    mod?.oai_settings?.preset_name ||
+    (mod?.promptManager?.serviceSettings as { preset_name?: string } | undefined)?.preset_name;
+  if (typeof fromSettings === 'string' && fromSettings.trim()) return fromSettings.trim();
+  const names = (states ?? (await getNamedStates())).map(s => s.name).join('|');
+  return `preset:${hashText(names)}`;
+}
+
 export function findInStates(states: NamedState[], name: string): NamedState | undefined {
   const n = normName(name);
   return states.find(s => s.name === n) ?? states.find(s => s.identifier === name);

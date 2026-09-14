@@ -17,14 +17,12 @@ const q = ref('');
 const rows = ref<PromptRow[]>([]);
 const draft = ref<Record<string, boolean>>({});
 const showSystem = ref(false);
-const loreSync = ref(false);
 const loreWorlds = ref<string[]>([]);
 
 onMounted(async () => {
   const p = profile.value;
   if (!p) return;
   name.value = p.name;
-  loreSync.value = Boolean(p.loreSync);
   loreWorlds.value = [...(p.loreWorlds ?? [])];
   rows.value = await promptRows();
   const next: Record<string, boolean> = {};
@@ -61,7 +59,6 @@ function setOn(row: PromptRow, enabled: boolean): void {
 async function save(applyNow: boolean): Promise<void> {
   const p = profile.value;
   if (!p) return;
-  p.loreSync = loreSync.value;
   p.loreWorlds = [...loreWorlds.value];
   persistSettings();
   await commitProfileDraft(p, name.value, draft.value, applyNow);
@@ -81,33 +78,25 @@ function onDelete(): void {
 <template>
   <p v-if="!profile" class="pb-empty">找不到这个方案。</p>
   <template v-else>
-    <p class="pb-hint">这里改的是方案草稿。点保存并套用会写入方案并立刻套用到酒馆。系统槽默认收着。</p>
+    <p class="pb-hint">这里改的是方案草稿。保存并套用会写入方案、立刻套用，并按下面勾的快捷世界书去挂（没勾的会摘掉）。</p>
     <input v-model="name" class="pb-input" placeholder="方案名字" />
-    <label class="pb-row">
-      <span class="ttl">
-        套用时同步世界书
-        <small>默认关。打开后会按下面勾的全局书去挂（有时要有时不要）。</small>
-      </span>
-      <input v-model="loreSync" type="checkbox" />
-    </label>
-    <template v-if="loreSync">
-      <button
-        v-for="s in settings.loreShortcuts"
-        :key="s.id"
-        class="pb-row"
-        :class="{ 'is-on': loreWorlds.includes(s.worldName) }"
-        type="button"
-        @click="
-          loreWorlds.includes(s.worldName)
-            ? (loreWorlds = loreWorlds.filter(w => w !== s.worldName))
-            : loreWorlds.push(s.worldName)
-        "
-      >
-        <span class="ttl">{{ s.name }}</span>
-        <span class="pb-switch" :class="{ 'is-on': loreWorlds.includes(s.worldName) }" />
-      </button>
-      <p v-if="!settings.loreShortcuts.length" class="pb-hint">先在主页把世界书加入快捷。</p>
-    </template>
+    <p class="pb-label">这个方案挂的快捷世界书</p>
+    <button
+      v-for="s in settings.loreShortcuts"
+      :key="s.id"
+      class="pb-row"
+      :class="{ 'is-on': loreWorlds.includes(s.worldName) }"
+      type="button"
+      @click="
+        loreWorlds.includes(s.worldName)
+          ? (loreWorlds = loreWorlds.filter(w => w !== s.worldName))
+          : loreWorlds.push(s.worldName)
+      "
+    >
+      <span class="ttl">{{ s.name }}</span>
+      <span class="pb-switch" :class="{ 'is-on': loreWorlds.includes(s.worldName) }" />
+    </button>
+    <p v-if="!settings.loreShortcuts.length" class="pb-hint">先在主页把世界书加入快捷。</p>
     <input v-model="q" class="pb-search" placeholder="搜索条目名" />
     <label class="pb-row">
       <span class="ttl">显示系统槽 / 分隔线</span>

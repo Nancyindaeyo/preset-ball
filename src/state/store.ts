@@ -1,5 +1,5 @@
-import { FACTORY_PROFILES, FACTORY_RULES, JAILBREAK_TIERS } from '@/catalog/factory';
-import { folderOf, isDivider, isReceiver, isSystemName } from '@/catalog/folders';
+import { FACTORY_PROFILES, FACTORY_RULES, OBSOLETE_BUILTINS } from '@/catalog/factory';
+import { folderOf, isDivider, isMothraPreset, isReceiver, isSystemName } from '@/catalog/folders';
 import { N } from '@/catalog/names';
 import { detectWarnings, overlapWarningId, packVisiblyOn } from '@/catalog/warnings';
 import { getContext, toast } from '@/host/context';
@@ -9,11 +9,13 @@ import {
   commitHostWrites,
   findInStates,
   getNamedStates,
+  getPresetLabel,
   type NamedState,
 } from '@/host/prompts';
-import { getGlobalWorlds, listWorldNames, replaceGlobalWorlds, setGlobalWorld } from '@/host/worldinfo';
+import { getGlobalWorlds, listWorldNames, setGlobalWorld } from '@/host/worldinfo';
 import type {
   ChatBinding,
+  FineFolder,
   LoreShortcut,
   Profile,
   PromptRow,
@@ -25,7 +27,7 @@ import { CHAT_META_KEY, SETTINGS_KEY, uid } from '@/version';
 import { reactive, ref } from 'vue';
 
 const DEFAULT: Settings = {
-  version: 1,
+  version: 2,
   orbEnabled: true,
   nsfwStyle: null,
   activeProfileId: null,
@@ -33,6 +35,8 @@ const DEFAULT: Settings = {
   rules: structuredClone(FACTORY_RULES),
   loreShortcuts: [],
   exclusiveGroups: {},
+  removedBuiltins: [],
+  fineLayouts: {},
 };
 
 export const settings = reactive<Settings>(structuredClone(DEFAULT));
@@ -41,6 +45,9 @@ export const warnings = ref<Warning[]>([]);
 export const applying = ref(false);
 export const ready = ref(false);
 export const dirty = ref(false);
+export const schemeDirty = ref(false);
+export const mothra = ref(true);
+export const presetKey = ref('');
 
 let writeGate = false;
 let applyLock = false;
@@ -63,17 +70,25 @@ function mergeFactory(stored: Partial<Settings> | undefined): Settings {
   if (Array.isArray(stored.profiles)) {
     base.profiles = stored.profiles as Profile[];
   }
+  const obsolete = new Set(OBSOLETE_BUILTINS);
+  const removed = new Set<string>([
+    ...(Array.isArray(stored.removedBuiltins) ? stored.removedBuiltins : []),
+    ...OBSOLETE_BUILTINS,
+  ]);
   const storedRules = Array.isArray(stored.rules) ? (stored.rules as Rule[]) : [];
-  const byBuiltin = new Map(storedRules.filter(r => r.builtin).map(r => [r.builtin, r]));
-  const userRules = storedRules.filter(r => !r.builtin);
-  base.rules = [
-    ...FACTORY_RULES.map(f => clone(byBuiltin.get(f.builtin) ?? f)),
-    ...userRules,
-  ];
+  const kept = storedRules.filter(r => !r.builtin || !obsolete.has(r.builtin));
+  const have = new Set(kept.map(r => r.builtin).filter((id): id is string => Boolean(id)));
+  const added = FACTORY_RULES.filter(f => f.builtin && !have.has(f.builtin) && !removed.has(f.builtin)).map(clone);
+  base.rules = [...kept, ...added];
+  base.removedBuiltins = [...removed].filter(id => !obsolete.has(id));
   if (Array.isArray(stored.loreShortcuts)) base.loreShortcuts = stored.loreShortcuts as LoreShortcut[];
   if (stored.exclusiveGroups && typeof stored.exclusiveGroups === 'object') {
     base.exclusiveGroups = { ...(stored.exclusiveGroups as Record<string, boolean>) };
   }
+  if (stored.fineLayouts && typeof stored.fineLayouts === 'object') {
+    base.fineLayouts = stored.fineLayouts as Record<string, FineFolder[]>;
+  }
+  base.version = 2;
   return base;
 }
 
@@ -102,6 +117,7 @@ function rememberBaseline(): void {
 
 function markDirty(): void {
   dirty.value = states.value.some(s => baseline.get(s.identifier) !== s.enabled);
+  schemeDirty.value = true;
 }
 
 function snapshotLocal(): Record<string, boolean> {
@@ -120,8 +136,11 @@ export function refreshWarnings(): void {
 
 export async function pullFromHost(): Promise<void> {
   states.value = await getNamedStates();
+  presetKey.value = await getPresetLabel(states.value);
+  mothra.value = isMothraPreset(states.value);
   refreshWarnings();
   rememberBaseline();
+  schemeDirty.value = false;
 }
 
 export async function refreshStates(): Promise<void> {
@@ -218,7 +237,7 @@ export function packIsOn(rule: Rule): boolean {
 
 /** 同组里真的有开/关打架时才标红，子集包同时亮不算 */
 export function packClash(rule: Rule): boolean {
-  const id = overlapWarningId(rule.id);
+  const id = overlapWarningId(rule.id, settings.rules);
   return Boolean(id && packIsOn(rule) && warnings.value.some(w => w.id === id));
 }
 
@@ -293,21 +312,39 @@ export async function applyProfile(profile: Profile, opts?: { skipLore?: boolean
     if (!states.value.length) await pullFromHost();
     const missing = loadProfileToDraft(profile);
     await pushToHost();
-    if (profile.loreSync && profile.loreWorlds?.length && !opts?.skipLore) {
-      await replaceGlobalWorlds(profile.loreWorlds);
-    }
+    if (!opts?.skipLore) await applyShortcutLore(profile.loreWorlds ?? []);
+    schemeDirty.value = false;
     toast('ok', missing.length ? `已套用「${profile.name}」，有 ${missing.length} 条当前预设没有` : `已套用「${profile.name}」`);
+  } catch (err) {
+    console.error('[预设球] 套用方案失败', err);
+    toast('err', '套用失败，看看控制台');
   } finally {
     applying.value = false;
     applyLock = false;
   }
 }
 
-export function saveSnapshotTo(profile: Profile): void {
+export async function snapshotShortcutLore(): Promise<string[]> {
+  const globals = await getGlobalWorlds();
+  return settings.loreShortcuts.map(s => s.worldName).filter(w => globals.includes(w));
+}
+
+export async function applyShortcutLore(worlds: string[]): Promise<void> {
+  const wanted = new Set(worlds);
+  const globals = await getGlobalWorlds();
+  for (const s of settings.loreShortcuts) {
+    const should = wanted.has(s.worldName);
+    const is = globals.includes(s.worldName);
+    if (should !== is) await setGlobalWorld(s.worldName, should);
+  }
+}
+
+export async function saveSnapshotTo(profile: Profile): Promise<void> {
   profile.kind = 'full';
   profile.entries = snapshotLocal();
   profile.enable = undefined;
   profile.disable = undefined;
+  profile.loreWorlds = await snapshotShortcutLore();
   profile.updatedAt = Date.now();
   persistSettings();
 }
@@ -319,20 +356,32 @@ export function addProfileFromCurrent(name: string): Profile {
     kind: 'full',
     updatedAt: Date.now(),
     entries: snapshotLocal(),
+    loreWorlds: [],
   };
   settings.profiles.push(p);
   settings.activeProfileId = p.id;
   persistSettings();
+  void snapshotShortcutLore().then(worlds => {
+    p.loreWorlds = worlds;
+    persistSettings();
+  });
+  schemeDirty.value = false;
   toast('ok', `已保存方案「${p.name}」`);
   return p;
 }
 
-export async function saveDraftAndApply(): Promise<void> {
+export async function saveCurrentProfile(): Promise<void> {
   const missing = await pushToHost();
-  const p = currentProfile();
-  if (p) saveSnapshotTo(p);
-  const who = p ? `「${p.name}」` : '酒馆';
-  toast('ok', missing.length ? `已保存并套用${who}，有 ${missing.length} 条当前预设没有` : `已保存并套用${who}`);
+  let p = currentProfile();
+  if (!p) {
+    const name = window.prompt('还没有当前方案。给现在这份起个名', '未命名方案');
+    if (name == null) return;
+    p = addProfileFromCurrent(name);
+  }
+  await saveSnapshotTo(p);
+  schemeDirty.value = false;
+  const who = `「${p.name}」`;
+  toast('ok', missing.length ? `已保存${who}，有 ${missing.length} 条当前预设没有` : `已保存${who}`);
 }
 
 export function duplicateProfile(src: Profile, name: string): Profile {
@@ -391,6 +440,7 @@ export async function commitProfileDraft(
   profile.disable = undefined;
   profile.updatedAt = Date.now();
   persistSettings();
+  schemeDirty.value = false;
   if (applyNow) await applyProfile(profile);
   else toast('ok', `已保存「${profile.name}」`);
 }
@@ -405,9 +455,9 @@ export function upsertRule(rule: Rule): void {
 
 export function removeRule(id: string): void {
   const rule = settings.rules.find(r => r.id === id);
-  if (rule?.builtin) {
-    toast('warn', '出厂规则不能删，可以改。不对就点恢复。');
-    return;
+  if (!rule) return;
+  if (rule.builtin && !settings.removedBuiltins.includes(rule.builtin)) {
+    settings.removedBuiltins.push(rule.builtin);
   }
   settings.rules = settings.rules.filter(r => r.id !== id);
   persistSettings();
@@ -427,6 +477,7 @@ export function resetRule(id: string): void {
 export function resetAllRules(): void {
   const user = settings.rules.filter(r => !r.builtin);
   settings.rules = [...clone(FACTORY_RULES), ...user];
+  settings.removedBuiltins = [];
   persistSettings();
   refreshWarnings();
   toast('ok', '出厂规则已恢复（你自己建的还在）');
@@ -443,22 +494,24 @@ export async function setNsfwStyle(style: 'haitang' | 'weimei'): Promise<void> {
   ]);
 }
 
-export function jailbreakLevel(): number {
+export function ladderLevel(rule: Rule): number {
+  if (rule.kind !== 'ladder' || !rule.tiers?.length) return 0;
   const map = onMap();
   let level = 0;
-  for (const tier of JAILBREAK_TIERS) {
-    const ok = tier.entries.every(n => n === N.setKeep || map.get(n) === true);
-    if (ok) level = tier.level;
+  for (let i = 0; i < rule.tiers.length; i++) {
+    const ok = rule.tiers[i].entries.every(n => n === N.setKeep || map.get(n) === true);
+    if (ok) level = i + 1;
     else break;
   }
   return level;
 }
 
-export async function setJailbreakLevel(level: number): Promise<void> {
+export async function setLadderLevel(rule: Rule, level: number): Promise<void> {
+  if (rule.kind !== 'ladder' || !rule.tiers) return;
   const changes: Array<{ name: string; enabled: boolean }> = [];
-  for (const tier of JAILBREAK_TIERS) {
-    const on = tier.level <= level;
-    for (const n of tier.entries) {
+  for (let i = 0; i < rule.tiers.length; i++) {
+    const on = i < level;
+    for (const n of rule.tiers[i].entries) {
       if (n === N.setKeep) {
         changes.push({ name: n, enabled: true });
         continue;
@@ -469,15 +522,32 @@ export async function setJailbreakLevel(level: number): Promise<void> {
   await setNames(changes);
 }
 
+export function currentFineLayout(): FineFolder[] | undefined {
+  if (mothra.value) return undefined;
+  const layout = settings.fineLayouts[presetKey.value];
+  return layout?.length ? layout : undefined;
+}
+
+export function saveFineLayout(folders: FineFolder[]): void {
+  if (!presetKey.value) return;
+  settings.fineLayouts[presetKey.value] = clone(folders);
+  persistSettings();
+}
+
+export function hasFineLayout(): boolean {
+  return Boolean(settings.fineLayouts[presetKey.value]?.length);
+}
+
 export async function promptRows(): Promise<PromptRow[]> {
   const list = states.value.length ? states.value : await getNamedStates();
+  const layout = currentFineLayout();
   return list.map(s => ({
     identifier: s.identifier,
     name: s.name,
     enabled: s.enabled,
     system: isSystemName(s.name),
     receiver: isReceiver(s.name),
-    folder: folderOf(s.name, isSystemName(s.name) || isDivider(s.name)),
+    folder: folderOf(s.name, isSystemName(s.name) || isDivider(s.name), layout),
   }));
 }
 
@@ -543,9 +613,53 @@ export async function toggleLore(shortcut: LoreShortcut): Promise<void> {
   const on = globals.includes(shortcut.worldName);
   const ok = await setGlobalWorld(shortcut.worldName, !on);
   if (!ok) toast('err', '挂载失败，可能当前环境读不到世界书列表');
+  else schemeDirty.value = true;
 }
 
-export { getGlobalWorlds, listWorldNames, persistSettings, JAILBREAK_TIERS };
+export async function toggleMutex(rule: Rule, name: string): Promise<void> {
+  const turnOn = !isOn(name);
+  const changes: Array<{ name: string; enabled: boolean }> = [];
+  if (turnOn) {
+    for (const n of rule.entries) changes.push({ name: n, enabled: n === name });
+  } else {
+    changes.push({ name, enabled: false });
+  }
+  await setNames(changes);
+}
+
+export function addRuleEntry(rule: Rule, name: string): void {
+  if (rule.kind === 'pack') {
+    if (!rule.on) rule.on = { enable: [], disable: [] };
+    if (!rule.on.enable.includes(name)) rule.on.enable.push(name);
+  } else if (rule.kind === 'ladder') {
+    if (!rule.tiers?.length) return;
+    const last = rule.tiers[rule.tiers.length - 1];
+    if (!last.entries.includes(name)) last.entries.push(name);
+  } else if (!rule.entries.includes(name)) {
+    rule.entries.push(name);
+  }
+  persistSettings();
+  refreshWarnings();
+}
+
+export function removeRuleEntry(rule: Rule, name: string): void {
+  if (rule.kind === 'pack' && rule.on) {
+    rule.on.enable = rule.on.enable.filter(n => n !== name);
+    rule.on.disable = rule.on.disable.filter(n => n !== name);
+    if (rule.off) {
+      rule.off.enable = rule.off.enable.filter(n => n !== name);
+      rule.off.disable = rule.off.disable.filter(n => n !== name);
+    }
+  } else if (rule.kind === 'ladder' && rule.tiers) {
+    for (const t of rule.tiers) t.entries = t.entries.filter(n => n !== name);
+  } else {
+    rule.entries = rule.entries.filter(n => n !== name);
+  }
+  persistSettings();
+  refreshWarnings();
+}
+
+export { getGlobalWorlds, listWorldNames, persistSettings };
 
 let lastChat = '';
 

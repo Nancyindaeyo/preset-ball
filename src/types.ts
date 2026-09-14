@@ -1,8 +1,13 @@
-export type RuleKind = 'group' | 'mutex' | 'pack';
+export type RuleKind = 'group' | 'mutex' | 'pack' | 'ladder';
 
 export interface PackSide {
   enable: string[];
   disable: string[];
+}
+
+export interface LadderTier {
+  name: string;
+  entries: string[];
 }
 
 export interface Rule {
@@ -13,6 +18,7 @@ export interface Rule {
   builtin?: string;
   /** 快捷区 / 我的 / 细调里的分组标签 */
   section: 'quick' | 'mine' | 'fine';
+  /** 界面上的备注，比如「一次加一层」 */
   hint?: string;
   /** group / mutex 的条目名 */
   entries: string[];
@@ -20,17 +26,10 @@ export interface Rule {
   on?: PackSide;
   /** pack：关闭时 */
   off?: PackSide;
-  /** 破限档位：1 起步，数字越大药越重 */
-  level?: number;
-  /** 仅作分组标签（伦理 / 骨架），默认不互斥，冲突用标红提示 */
+  /** 档位：从低到高，选更高档会带上更低档 */
+  tiers?: LadderTier[];
+  /** 仅作分组标签，默认不互斥，冲突用标红提示 */
   packGroup?: string;
-}
-
-export interface JailbreakTier {
-  level: number;
-  name: string;
-  hint: string;
-  entries: string[];
 }
 
 export type ProfileKind = 'patch' | 'full';
@@ -41,13 +40,10 @@ export interface Profile {
   kind: ProfileKind;
   builtin?: string;
   updatedAt: number;
-  /** patch 模板：只动列出的条目 */
   enable?: string[];
   disable?: string[];
-  /** full：全量快照 */
   entries?: Record<string, boolean>;
-  /** 套用时是否同步下面这些全局世界书（默认关） */
-  loreSync?: boolean;
+  /** 套用时按这份列表开关快捷世界书。空数组 = 快捷书全摘掉 */
   loreWorlds?: string[];
 }
 
@@ -55,6 +51,12 @@ export interface LoreShortcut {
   id: string;
   name: string;
   worldName: string;
+}
+
+export interface FineFolder {
+  id: string;
+  name: string;
+  entries: string[];
 }
 
 export interface Settings {
@@ -65,8 +67,11 @@ export interface Settings {
   profiles: Profile[];
   rules: Rule[];
   loreShortcuts: LoreShortcut[];
-  /** 用户主动打开「只能选一个」的分组。默认都可以叠。 */
   exclusiveGroups: Record<string, boolean>;
+  /** 用户删掉的出厂规则，hydrate 时不要补回来 */
+  removedBuiltins: string[];
+  /** 非蛾摩拉预设：按预设名记住自己分的组 */
+  fineLayouts: Record<string, FineFolder[]>;
 }
 
 export interface ChatBinding {

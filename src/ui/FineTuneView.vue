@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isOn, promptRows, settings, toggleName } from '@/state/store';
+import { isOn, mothra, promptRows, settings, toggleMutex, toggleName } from '@/state/store';
 import { go } from '@/state/ui';
 import type { PromptRow } from '@/types';
 import { computed, onMounted, ref } from 'vue';
@@ -14,6 +14,8 @@ onMounted(async () => {
   rows.value = await promptRows();
 });
 
+const present = computed(() => new Set(rows.value.map(r => r.name)));
+
 const folders = computed(() => {
   const map = new Map<string, PromptRow[]>();
   const qq = q.value.trim();
@@ -27,8 +29,12 @@ const folders = computed(() => {
   return [...map.entries()];
 });
 
-const mutexes = computed(() => settings.rules.filter(r => r.kind === 'mutex'));
-const groups = computed(() => settings.rules.filter(r => r.kind === 'group' && r.section !== 'quick'));
+const mutexes = computed(() =>
+  settings.rules.filter(r => r.kind === 'mutex' && r.entries.some(n => present.value.has(n))),
+);
+const groups = computed(() =>
+  settings.rules.filter(r => r.kind === 'group' && r.section !== 'quick' && r.entries.some(n => present.value.has(n))),
+);
 
 async function tap(row: PromptRow): Promise<void> {
   await toggleName(row.name, !isOn(row.name));
@@ -37,7 +43,8 @@ async function tap(row: PromptRow): Promise<void> {
 </script>
 
 <template>
-  <p class="pb-hint">改的是预览，回主页后若有改动，点「保存并套用」才写进酒馆。标红的是接收器关着：上面条目开了也进不去。</p>
+  <p class="pb-hint">改的是预览，回主页点「保存方案」才写进酒馆和当前方案。标红的是接收器关着：上面条目开了也进不去。</p>
+  <button v-if="!mothra" class="pb-btn" type="button" @click="go({ name: 'group-setup' })">重新分组</button>
   <input v-model="q" class="pb-search" placeholder="搜索" />
   <label class="pb-row">
     <span class="ttl">显示系统槽</span>
@@ -51,12 +58,12 @@ async function tap(row: PromptRow): Promise<void> {
     <p v-if="m.hint" class="pb-hint">{{ m.hint }}</p>
     <div class="pb-chips">
       <button
-        v-for="n in m.entries"
+        v-for="n in m.entries.filter(x => present.has(x))"
         :key="n"
         class="pb-chip"
         :class="{ 'is-on': isOn(n) }"
         type="button"
-        @click="toggleName(n, !isOn(n))"
+        @click="toggleMutex(m, n)"
       >
         {{ n }}
       </button>
@@ -68,7 +75,7 @@ async function tap(row: PromptRow): Promise<void> {
       <EditBtn :label="`改 ${g.name}`" @click="go({ name: 'rule-edit', id: g.id, from: { name: 'fine' } })" />
     </SecHead>
     <button
-      v-for="n in g.entries"
+      v-for="n in g.entries.filter(x => present.has(x))"
       :key="n"
       class="pb-row"
       :class="{ 'is-on': isOn(n) }"

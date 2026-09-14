@@ -1,4 +1,4 @@
-import { dirty, pullFromHost } from '@/state/store';
+import { dirty, pullFromHost, saveCurrentProfile, schemeDirty } from '@/state/store';
 import { reactive } from 'vue';
 
 export type View =
@@ -6,8 +6,8 @@ export type View =
   | { name: 'profile-edit'; id: string }
   | { name: 'rule-edit'; id: string; from?: View }
   | { name: 'rule-create' }
-  | { name: 'group-edit'; group: string }
   | { name: 'fine' }
+  | { name: 'group-setup' }
   | { name: 'lore-pick' };
 
 export const ui = reactive({
@@ -15,14 +15,42 @@ export const ui = reactive({
   view: { name: 'home' } as View,
 });
 
+export type ConfirmChoice = 'save' | 'discard' | 'cancel';
+
+export const confirmDlg = reactive({
+  open: false,
+  text: '',
+  resolve: null as ((v: ConfirmChoice) => void) | null,
+});
+
+export function askConfirm(text: string): Promise<ConfirmChoice> {
+  return new Promise(resolve => {
+    confirmDlg.open = true;
+    confirmDlg.text = text;
+    confirmDlg.resolve = v => {
+      confirmDlg.open = false;
+      confirmDlg.resolve = null;
+      resolve(v);
+    };
+  });
+}
+
+export function needsSave(): boolean {
+  return dirty.value || schemeDirty.value;
+}
+
 export function openSheet(): void {
   ui.sheet = true;
   ui.view = { name: 'home' };
   void pullFromHost();
 }
 
-export function closeSheet(): void {
-  if (dirty.value && !window.confirm('改动还没写进酒馆，关掉会丢掉。确定关？')) return;
+export async function closeSheet(): Promise<void> {
+  if (needsSave()) {
+    const choice = await askConfirm('改动还没保存到方案。关掉会丢掉这次改的。');
+    if (choice === 'cancel') return;
+    if (choice === 'save') await saveCurrentProfile();
+  }
   ui.sheet = false;
   ui.view = { name: 'home' };
 }

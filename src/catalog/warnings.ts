@@ -1,7 +1,6 @@
 import type { NamedState } from '@/host/prompts';
 import { findInStates, normName } from '@/host/prompts';
 import type { Rule, Warning } from '@/types';
-import { HOME_SECTIONS } from './groups';
 import { N, RECEIVERS, SKELETONS, TONES } from './names';
 
 export function packLit(rule: Rule, on: (n: string) => boolean): boolean {
@@ -14,7 +13,6 @@ function disableOff(rule: Rule, on: (n: string) => boolean): boolean {
   return (rule.on?.disable ?? []).every(n => !on(n));
 }
 
-/** 更具体的包已经完整亮着时，子集包（原创 vs 角色卡）不要当成也亮着。 */
 function moreSpecific(a: Rule, b: Rule): boolean {
   const aEn = a.on?.enable ?? [];
   const bEn = b.on?.enable ?? [];
@@ -25,37 +23,39 @@ function moreSpecific(a: Rule, b: Rule): boolean {
   return aEn.length + aDis.length > bEn.length + bDis.length;
 }
 
+function sameGroup(a: Rule, b: Rule): boolean {
+  return Boolean(a.packGroup && a.packGroup === b.packGroup);
+}
+
 export function packVisiblyOn(rule: Rule, on: (n: string) => boolean, rules: Rule[]): boolean {
   if (!packLit(rule, on)) return false;
-  const spec = Object.values(HOME_SECTIONS).find(s => s.ruleIds.includes(rule.id));
-  if (!spec) return true;
-  return !spec.ruleIds.some(id => {
-    if (id === rule.id) return false;
-    const other = rules.find(r => r.id === id);
-    return Boolean(other && packLit(other, on) && disableOff(other, on) && moreSpecific(other, rule));
-  });
+  if (!rule.packGroup) return true;
+  return !rules.some(
+    other => other.id !== rule.id && sameGroup(rule, other) && packLit(other, on) && disableOff(other, on) && moreSpecific(other, rule),
+  );
 }
 
 function shortRule(name: string): string {
-  return name.replace(/^伦理：/, '').replace(/^骨架：/, '');
+  return name.replace(/^伦理：/, '').replace(/^骨架：/, '').replace(/^一键/, '');
 }
 
-function overlapKeyOf(ruleId: string): string | undefined {
-  return Object.entries(HOME_SECTIONS).find(([, spec]) => spec.ruleIds.includes(ruleId))?.[0];
-}
-
-export function overlapWarningId(ruleId: string): string | undefined {
-  const key = overlapKeyOf(ruleId);
-  return key ? `overlap:${key}` : undefined;
+export function overlapWarningId(ruleId: string, rules: Rule[]): string | undefined {
+  const rule = rules.find(r => r.id === ruleId);
+  if (!rule?.packGroup) return undefined;
+  return `overlap:${rule.packGroup}`;
 }
 
 function overlapWarnings(statesOn: (n: string) => boolean, rules: Rule[]): Warning[] {
   const out: Warning[] = [];
-  for (const [key, spec] of Object.entries(HOME_SECTIONS)) {
-    if (spec.ruleIds.length < 2) continue;
-    const members = spec.ruleIds
-      .map(id => rules.find(r => r.id === id))
-      .filter((r): r is Rule => r != null && r.kind === 'pack');
+  const groups = new Map<string, Rule[]>();
+  for (const r of rules) {
+    if (r.kind !== 'pack' || !r.packGroup) continue;
+    const list = groups.get(r.packGroup) ?? [];
+    list.push(r);
+    groups.set(r.packGroup, list);
+  }
+  for (const [key, members] of groups) {
+    if (members.length < 2) continue;
     const lit = members.filter(r => packVisiblyOn(r, statesOn, rules));
     if (lit.length < 2) continue;
     const clashes: string[] = [];
@@ -66,22 +66,17 @@ function overlapWarnings(statesOn: (n: string) => boolean, rules: Rule[]): Warni
         const aKillsB = (a.on?.disable ?? []).filter(n => (b.on?.enable ?? []).includes(n) && statesOn(n));
         const bKillsA = (b.on?.disable ?? []).filter(n => (a.on?.enable ?? []).includes(n) && statesOn(n));
         if (aKillsB.length) {
-          clashes.push(
-            `「${shortRule(a.name)}」要关「${aKillsB.slice(0, 2).join('、')}」，「${shortRule(b.name)}」要开它`,
-          );
+          clashes.push(`「${shortRule(a.name)}」要关「${aKillsB.slice(0, 2).join('、')}」，「${shortRule(b.name)}」要开它`);
         }
         if (bKillsA.length) {
-          clashes.push(
-            `「${shortRule(b.name)}」要关「${bKillsA.slice(0, 2).join('、')}」，「${shortRule(a.name)}」要开它`,
-          );
+          clashes.push(`「${shortRule(b.name)}」要关「${bKillsA.slice(0, 2).join('、')}」，「${shortRule(a.name)}」要开它`);
         }
       }
     }
     if (!clashes.length) continue;
-    const names = lit.map(r => shortRule(r.name)).join('、');
     out.push({
       id: `overlap:${key}`,
-      text: `「${spec.title}」同时亮了${names}。${clashes.slice(0, 2).join('；')}。可以叠，觉得不对就关掉其中一个，或点铅笔改规则。`,
+      text: `同时亮了${lit.map(r => shortRule(r.name)).join('、')}。${clashes.slice(0, 2).join('；')}。可以叠，觉得不对就关掉其中一个。`,
     });
   }
   return out;
@@ -93,17 +88,15 @@ export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
 
   warnings.push(...overlapWarnings(on, rules));
 
-  const overlapPackIds = new Set(
-    Object.values(HOME_SECTIONS).flatMap(s => (s.ruleIds.length >= 2 ? s.ruleIds : [])),
-  );
+  const grouped = new Set(rules.filter(r => r.kind === 'pack' && r.packGroup).map(r => r.id));
   for (const rule of rules) {
-    if (overlapPackIds.has(rule.id)) continue;
+    if (grouped.has(rule.id)) continue;
     if (!packLit(rule, on) || !rule.on) continue;
     const leftover = (rule.on.disable ?? []).filter(n => on(n));
     if (!leftover.length) continue;
     warnings.push({
       id: `pack-clash:${rule.id}`,
-      text: `「${shortRule(rule.name)}」亮着，但它要关掉的「${leftover.slice(0, 3).join('、')}${leftover.length > 3 ? '…' : ''}」还开着。可以叠，觉得不对就点铅笔改这条规则。`,
+      text: `「${shortRule(rule.name)}」亮着，但它要关掉的「${leftover.slice(0, 3).join('、')}${leftover.length > 3 ? '…' : ''}」还开着。可以叠，觉得不对就改这条。`,
     });
   }
 
@@ -113,7 +106,7 @@ export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
     if (lit.length > 1) {
       warnings.push({
         id: `mutex:${rule.id}`,
-        text: `「${rule.name}」同时开了 ${lit.length} 条（${lit.slice(0, 3).join('、')}${lit.length > 3 ? '…' : ''}）。同变量只生效后写的那条。可以叠，觉得不对就自己关。`,
+        text: `「${rule.name}」同时开了 ${lit.length} 条（${lit.slice(0, 3).join('、')}${lit.length > 3 ? '…' : ''}）。同变量只生效后写的那条。`,
       });
     }
   }
@@ -173,7 +166,7 @@ export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
   if (on(N.prefillBottom) || on(N.noThinkBottom)) {
     warnings.push({
       id: 'assistant-bottom',
-      text: '底部还有 assistant 预填条目。Gemini 3.5 起请求以模型条结尾会 400。点快捷里的「关掉底部 assistant」。',
+      text: '底部还有 assistant 预填条目。Gemini 3.5 起请求以模型条结尾会 400。可点「关掉底部 assistant」。',
     });
   }
 
