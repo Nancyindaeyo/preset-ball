@@ -4,14 +4,49 @@ import type { Rule, Warning } from '@/types';
 import { HOME_SECTIONS } from './groups';
 import { N, RECEIVERS, SKELETONS, TONES } from './names';
 
-function packLit(rule: Rule, on: (n: string) => boolean): boolean {
+export function packLit(rule: Rule, on: (n: string) => boolean): boolean {
   if (rule.kind !== 'pack' || !rule.on) return false;
   if (!rule.on.enable.length) return rule.on.disable.every(n => !on(n));
   return rule.on.enable.every(n => on(n));
 }
 
+function disableOff(rule: Rule, on: (n: string) => boolean): boolean {
+  return (rule.on?.disable ?? []).every(n => !on(n));
+}
+
+/** 更具体的包已经完整亮着时，子集包（原创 vs 角色卡）不要当成也亮着。 */
+function moreSpecific(a: Rule, b: Rule): boolean {
+  const aEn = a.on?.enable ?? [];
+  const bEn = b.on?.enable ?? [];
+  const aDis = a.on?.disable ?? [];
+  const bDis = b.on?.disable ?? [];
+  if (!bEn.every(n => aEn.includes(n))) return false;
+  if (!bDis.every(n => aDis.includes(n))) return false;
+  return aEn.length + aDis.length > bEn.length + bDis.length;
+}
+
+export function packVisiblyOn(rule: Rule, on: (n: string) => boolean, rules: Rule[]): boolean {
+  if (!packLit(rule, on)) return false;
+  const spec = Object.values(HOME_SECTIONS).find(s => s.ruleIds.includes(rule.id));
+  if (!spec) return true;
+  return !spec.ruleIds.some(id => {
+    if (id === rule.id) return false;
+    const other = rules.find(r => r.id === id);
+    return Boolean(other && packLit(other, on) && disableOff(other, on) && moreSpecific(other, rule));
+  });
+}
+
 function shortRule(name: string): string {
   return name.replace(/^伦理：/, '').replace(/^骨架：/, '');
+}
+
+function overlapKeyOf(ruleId: string): string | undefined {
+  return Object.entries(HOME_SECTIONS).find(([, spec]) => spec.ruleIds.includes(ruleId))?.[0];
+}
+
+export function overlapWarningId(ruleId: string): string | undefined {
+  const key = overlapKeyOf(ruleId);
+  return key ? `overlap:${key}` : undefined;
 }
 
 function overlapWarnings(statesOn: (n: string) => boolean, rules: Rule[]): Warning[] {
@@ -21,15 +56,15 @@ function overlapWarnings(statesOn: (n: string) => boolean, rules: Rule[]): Warni
     const members = spec.ruleIds
       .map(id => rules.find(r => r.id === id))
       .filter((r): r is Rule => r != null && r.kind === 'pack');
-    const lit = members.filter(r => packLit(r, statesOn));
+    const lit = members.filter(r => packVisiblyOn(r, statesOn, rules));
     if (lit.length < 2) continue;
     const clashes: string[] = [];
     for (let i = 0; i < lit.length; i++) {
       for (let j = i + 1; j < lit.length; j++) {
         const a = lit[i];
         const b = lit[j];
-        const aKillsB = (a.on?.disable ?? []).filter(n => (b.on?.enable ?? []).includes(n));
-        const bKillsA = (b.on?.disable ?? []).filter(n => (a.on?.enable ?? []).includes(n));
+        const aKillsB = (a.on?.disable ?? []).filter(n => (b.on?.enable ?? []).includes(n) && statesOn(n));
+        const bKillsA = (b.on?.disable ?? []).filter(n => (a.on?.enable ?? []).includes(n) && statesOn(n));
         if (aKillsB.length) {
           clashes.push(
             `「${shortRule(a.name)}」要关「${aKillsB.slice(0, 2).join('、')}」，「${shortRule(b.name)}」要开它`,
@@ -42,11 +77,11 @@ function overlapWarnings(statesOn: (n: string) => boolean, rules: Rule[]): Warni
         }
       }
     }
+    if (!clashes.length) continue;
     const names = lit.map(r => shortRule(r.name)).join('、');
-    const extra = clashes.length ? clashes.slice(0, 2).join('；') + '。' : '出厂规则通常只开一个。';
     out.push({
       id: `overlap:${key}`,
-      text: `「${spec.title}」同时亮了${names}。${extra}可以叠，觉得不对就关掉其中一个，或点铅笔改规则。`,
+      text: `「${spec.title}」同时亮了${names}。${clashes.slice(0, 2).join('；')}。可以叠，觉得不对就关掉其中一个，或点铅笔改规则。`,
     });
   }
   return out;
@@ -58,7 +93,11 @@ export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
 
   warnings.push(...overlapWarnings(on, rules));
 
+  const overlapPackIds = new Set(
+    Object.values(HOME_SECTIONS).flatMap(s => (s.ruleIds.length >= 2 ? s.ruleIds : [])),
+  );
   for (const rule of rules) {
+    if (overlapPackIds.has(rule.id)) continue;
     if (!packLit(rule, on) || !rule.on) continue;
     const leftover = (rule.on.disable ?? []).filter(n => on(n));
     if (!leftover.length) continue;

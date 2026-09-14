@@ -37,7 +37,7 @@ async function tap(row: PromptRow): Promise<void> {
 </script>
 
 <template>
-  <p class="pb-hint">改的是预览，回主页点「保存并套用」才写进酒馆。标红的是接收器关着：上面条目开了也进不去。</p>
+  <p class="pb-hint">改的是预览，回主页后若有改动，点「保存并套用」才写进酒馆。标红的是接收器关着：上面条目开了也进不去。</p>
   <input v-model="q" class="pb-search" placeholder="搜索" />
   <label class="pb-row">
     <span class="ttl">显示系统槽</span>

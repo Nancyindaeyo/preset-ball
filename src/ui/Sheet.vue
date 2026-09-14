@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { closeSheet, back, ui } from '@/state/ui';
-import { dirty, saveDraftAndApply, saveDraftOnly } from '@/state/store';
+import { currentProfile, dirty, saveDraftAndApply } from '@/state/store';
 import HomeView from '@/ui/HomeView.vue';
 import ProfileEditView from '@/ui/ProfileEditView.vue';
 import RuleEditView from '@/ui/RuleEditView.vue';
@@ -10,6 +10,8 @@ import LorePickView from '@/ui/LorePickView.vue';
 import GroupEditView from '@/ui/GroupEditView.vue';
 import { computed } from 'vue';
 
+const active = computed(() => currentProfile());
+const nested = computed(() => ui.view.name !== 'home');
 const title = computed(() => {
   switch (ui.view.name) {
     case 'profile-edit':
@@ -25,11 +27,9 @@ const title = computed(() => {
     case 'lore-pick':
       return '加入世界书';
     default:
-      return '预设球';
+      return active.value ? `现在：${active.value.name}` : '预设球';
   }
 });
-
-const nested = computed(() => ui.view.name !== 'home');
 </script>
 
 <template>
@@ -51,9 +51,9 @@ const nested = computed(() => ui.view.name !== 'home');
       <LorePickView v-else-if="ui.view.name === 'lore-pick'" />
     </div>
     <footer v-if="ui.view.name === 'home'" class="pb-foot">
-      <p class="pb-hint">{{ dirty ? '上面改的还没写进酒馆。' : '打开时已读入当前预设。改完再保存。' }}</p>
-      <div class="pb-actions">
-        <button class="pb-btn" type="button" @click="saveDraftOnly">只保存</button>
+      <p class="pb-now">{{ active ? `现在是「${active.name}」` : '还没选方案' }}</p>
+      <p class="pb-hint">{{ dirty ? '上面改的还没写进酒馆。' : '点方案名字会立刻套用。改开关后再保存。' }}</p>
+      <div v-if="dirty" class="pb-actions">
         <button class="pb-btn primary" type="button" @click="saveDraftAndApply">保存并套用</button>
       </div>
     </footer>

@@ -81,7 +81,7 @@ function onDelete(): void {
 <template>
   <p v-if="!profile" class="pb-empty">找不到这个方案。</p>
   <template v-else>
-    <p class="pb-hint">这里改的是方案草稿。点保存之前不会动酒馆。系统槽默认收着。</p>
+    <p class="pb-hint">这里改的是方案草稿。点保存并套用会写入方案并立刻套用到酒馆。系统槽默认收着。</p>
     <input v-model="name" class="pb-input" placeholder="方案名字" />
     <label class="pb-row">
       <span class="ttl">
@@ -132,7 +132,6 @@ function onDelete(): void {
     </details>
     <div class="pb-foot">
       <div class="pb-actions">
-        <button class="pb-btn" type="button" @click="save(false)">只保存</button>
         <button class="pb-btn primary" type="button" @click="save(true)">保存并套用</button>
       </div>
       <button class="pb-btn danger pb-delete" type="button" @click="onDelete">删除这个方案</button>

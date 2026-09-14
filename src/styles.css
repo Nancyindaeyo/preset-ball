@@ -547,6 +547,17 @@
   margin: 0 0 10px;
 }
 
+.pb-now {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--pb-ink);
+}
+
+.pb-foot .pb-now {
+  margin-bottom: 4px;
+}
+
 .pb-empty {
   color: var(--pb-muted);
   padding: 18px 8px;

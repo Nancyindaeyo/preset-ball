@@ -1,7 +1,7 @@
 import { FACTORY_PROFILES, FACTORY_RULES, JAILBREAK_TIERS } from '@/catalog/factory';
 import { folderOf, isDivider, isReceiver, isSystemName } from '@/catalog/folders';
 import { N } from '@/catalog/names';
-import { detectWarnings } from '@/catalog/warnings';
+import { detectWarnings, overlapWarningId, packVisiblyOn } from '@/catalog/warnings';
 import { getContext, toast } from '@/host/context';
 import { onHostEvent } from '@/host/events';
 import {
@@ -114,9 +114,13 @@ function snapshotLocal(): Record<string, boolean> {
   return out;
 }
 
+export function refreshWarnings(): void {
+  warnings.value = detectWarnings(states.value, settings.rules);
+}
+
 export async function pullFromHost(): Promise<void> {
   states.value = await getNamedStates();
-  warnings.value = detectWarnings(states.value, settings.rules);
+  refreshWarnings();
   rememberBaseline();
 }
 
@@ -152,7 +156,7 @@ export async function setNames(changes: Array<{ name: string; enabled: boolean }
     hit.enabled = c.enabled;
   }
   states.value = next;
-  warnings.value = detectWarnings(states.value, settings.rules);
+  refreshWarnings();
   markDirty();
   if (missing.length) {
     toast('warn', `这几条在当前预设里找不到：${missing.slice(0, 4).join('、')}${missing.length > 4 ? '…' : ''}`);
@@ -209,17 +213,13 @@ function flattenPack(rule: Rule, turnOn: boolean): Array<{ name: string; enabled
 }
 
 export function packIsOn(rule: Rule): boolean {
-  if (rule.kind !== 'pack' || !rule.on) return false;
-  if (!rule.on.enable.length) {
-    return rule.on.disable.every(n => !isOn(n));
-  }
-  return rule.on.enable.every(n => isOn(n));
+  return packVisiblyOn(rule, isOn, settings.rules);
 }
 
-/** 这个包亮着，但它要关掉的条目还开着（多半是和别的包叠上了） */
+/** 同组里真的有开/关打架时才标红，子集包同时亮不算 */
 export function packClash(rule: Rule): boolean {
-  if (!packIsOn(rule) || !rule.on) return false;
-  return (rule.on.disable ?? []).some(n => isOn(n));
+  const id = overlapWarningId(rule.id);
+  return Boolean(id && packIsOn(rule) && warnings.value.some(w => w.id === id));
 }
 
 function groupIsExclusive(rule: Rule): boolean {
@@ -274,16 +274,15 @@ export function loadProfileToDraft(profile: Profile): string[] {
     }
   }
   states.value = next;
-  warnings.value = detectWarnings(states.value, settings.rules);
+  refreshWarnings();
   settings.activeProfileId = profile.id;
   persistSettings();
   markDirty();
   return missing;
 }
 
-export async function previewProfile(profile: Profile): Promise<void> {
-  if (!states.value.length) await pullFromHost();
-  loadProfileToDraft(profile);
+export function currentProfile(): Profile | null {
+  return settings.profiles.find(p => p.id === settings.activeProfileId) ?? null;
 }
 
 export async function applyProfile(profile: Profile, opts?: { skipLore?: boolean }): Promise<void> {
@@ -328,27 +327,12 @@ export function addProfileFromCurrent(name: string): Profile {
   return p;
 }
 
-export function saveDraftOnly(): void {
-  if (settings.activeProfileId) {
-    const p = settings.profiles.find(x => x.id === settings.activeProfileId);
-    if (p) {
-      saveSnapshotTo(p);
-      toast('ok', `已保存「${p.name}」，还没写进酒馆`);
-      return;
-    }
-  }
-  const name = window.prompt('给这个方案起个名', '未命名方案');
-  if (name == null) return;
-  addProfileFromCurrent(name);
-}
-
 export async function saveDraftAndApply(): Promise<void> {
   const missing = await pushToHost();
-  if (settings.activeProfileId) {
-    const p = settings.profiles.find(x => x.id === settings.activeProfileId);
-    if (p) saveSnapshotTo(p);
-  }
-  toast('ok', missing.length ? `已写进酒馆，有 ${missing.length} 条当前预设没有` : '已写进酒馆');
+  const p = currentProfile();
+  if (p) saveSnapshotTo(p);
+  const who = p ? `「${p.name}」` : '酒馆';
+  toast('ok', missing.length ? `已保存并套用${who}，有 ${missing.length} 条当前预设没有` : `已保存并套用${who}`);
 }
 
 export function duplicateProfile(src: Profile, name: string): Profile {
@@ -408,7 +392,7 @@ export async function commitProfileDraft(
   profile.updatedAt = Date.now();
   persistSettings();
   if (applyNow) await applyProfile(profile);
-  else toast('ok', `已保存「${profile.name}」，还没写进酒馆`);
+  else toast('ok', `已保存「${profile.name}」`);
 }
 
 export function upsertRule(rule: Rule): void {
@@ -416,6 +400,7 @@ export function upsertRule(rule: Rule): void {
   if (i >= 0) settings.rules[i] = rule;
   else settings.rules.push(rule);
   persistSettings();
+  refreshWarnings();
 }
 
 export function removeRule(id: string): void {
@@ -426,6 +411,7 @@ export function removeRule(id: string): void {
   }
   settings.rules = settings.rules.filter(r => r.id !== id);
   persistSettings();
+  refreshWarnings();
 }
 
 export function resetRule(id: string): void {
@@ -434,6 +420,7 @@ export function resetRule(id: string): void {
   const i = settings.rules.findIndex(r => r.id === id || r.builtin === factory.builtin);
   if (i >= 0) settings.rules[i] = clone(factory);
   persistSettings();
+  refreshWarnings();
   toast('ok', '已恢复这条出厂规则');
 }
 
@@ -441,6 +428,7 @@ export function resetAllRules(): void {
   const user = settings.rules.filter(r => !r.builtin);
   settings.rules = [...clone(FACTORY_RULES), ...user];
   persistSettings();
+  refreshWarnings();
   toast('ok', '出厂规则已恢复（你自己建的还在）');
 }
 

@@ -9,7 +9,9 @@ import {
   jailbreakLevel,
   packClash,
   packIsOn,
-  previewProfile,
+  applyProfile,
+  currentProfile,
+  dirty,
   readBinding,
   removeLoreShortcut,
   removeProfile,
@@ -31,6 +33,7 @@ import SecHead from '@/ui/SecHead.vue';
 const globals = ref<string[]>([]);
 const bind = computed(() => readBinding());
 const boundProfile = computed(() => settings.profiles.find(p => p.id === bind.value?.profileId) ?? null);
+const active = computed(() => currentProfile());
 
 const skeletons: Array<{ id: string; label: string }> = [
   { id: 'pack-original', label: '原创' },
@@ -99,7 +102,7 @@ function confirmDelete(p: Profile): void {
 }
 
 async function tapProfile(p: Profile): Promise<void> {
-  await previewProfile(p);
+  await applyProfile(p);
 }
 
 function saveNew(): void {
@@ -137,7 +140,8 @@ function ethicsLabel(name: string): string {
 
   <section class="pb-block">
     <h2>方案</h2>
-    <p class="pb-hint">点名字先预览。底部「保存并套用」才写进酒馆。「只保存」只记进方案。</p>
+    <p class="pb-now">{{ active ? `现在是「${active.name}」` : '还没选方案' }}<template v-if="dirty"> · 有改动还没写进酒馆</template></p>
+    <p class="pb-hint">点名字立刻套用。改开关之后再点底部「保存并套用」。</p>
     <div v-for="p in settings.profiles" :key="p.id" class="pb-card" :class="{ 'is-on': settings.activeProfileId === p.id }">
       <button class="pb-card-hit" type="button" @click="tapProfile(p)">
         <span class="ttl">
