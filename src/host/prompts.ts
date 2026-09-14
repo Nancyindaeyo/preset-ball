@@ -44,7 +44,10 @@ function activeChar(pm: PromptManager): unknown {
 }
 
 export function normName(name: string): string {
-  return String(name || '').trim().replace(/\s+/g, ' ');
+  return String(name || '')
+    .replace(/[\u200B-\u200D\uFEFF\uFE0F\u00A0]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 export async function listPromptDefs(): Promise<PromptDef[]> {
@@ -107,7 +110,8 @@ export async function applyNamedEnabled(
   for (const c of changes) {
     const hit = findInStates(states, c.name);
     if (!hit) {
-      missing.push(c.name);
+      // 当前角色顺序里没有：要关等于本来就关，不报；要开才算缺
+      if (c.enabled) missing.push(c.name);
       continue;
     }
     const ok = await setEnabled(hit.identifier, c.enabled);

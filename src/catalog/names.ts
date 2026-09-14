@@ -186,4 +186,4 @@ export const FAN_RELATED = [N.skeletonFanFull, N.skeletonFanShort, N.fanOpt, N.t
 
 export const SCAN_GROUP = [N.scanRespect, N.scanLang, N.scanWarm, N.scanLogic, N.scanCot, N.scanRecv];
 
-export const ALWAYS_OFF = [N.nsfwOpt1, N.nsfwOpt2, N.cotEmotion, N.cotCut, N.nsfwFlow, N.prefillBottom, N.noThinkBottom];
+export const ALWAYS_OFF = [N.nsfwOpt1, N.nsfwOpt2, N.cotEmotion, N.cotCut, N.nsfwFlow, N.prefillBottom];
