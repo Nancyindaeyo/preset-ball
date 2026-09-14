@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { HOME_SECTIONS } from '@/catalog/groups';
 import {
   JAILBREAK_TIERS,
   applyPack,
@@ -7,6 +8,7 @@ import {
   getGlobalWorlds,
   isOn,
   jailbreakLevel,
+  packClash,
   packIsOn,
   readBinding,
   removeLoreShortcut,
@@ -23,6 +25,8 @@ import {
 import { go } from '@/state/ui';
 import type { Profile, Rule } from '@/types';
 import { computed, onMounted, ref } from 'vue';
+import EditBtn from '@/ui/EditBtn.vue';
+import SecHead from '@/ui/SecHead.vue';
 
 const globals = ref<string[]>([]);
 const bind = computed(() => readBinding());
@@ -34,7 +38,9 @@ const skeletons: Array<{ id: string; label: string }> = [
   { id: 'pack-charcard', label: '角色卡' },
   { id: 'pack-light', label: '少作业' },
 ];
-const ethics = computed(() => settings.rules.filter(r => r.packGroup === 'ethics'));
+const ethics = computed(() =>
+  HOME_SECTIONS.ethics.ruleIds.map(id => settings.rules.find(r => r.id === id)).filter((r): r is Rule => Boolean(r)),
+);
 const nsfw = computed(() => settings.rules.find(r => r.id === 'pack-nsfw'));
 const jbCheck = computed(() => settings.rules.find(r => r.id === 'jb-check'));
 const persona = computed(() => settings.rules.find(r => r.id === 'group-persona'));
@@ -53,11 +59,20 @@ function ruleById(id: string): Rule | undefined {
   return settings.rules.find(r => r.id === id);
 }
 
+function editSection(key: string): void {
+  const spec = HOME_SECTIONS[key];
+  if (!spec) return;
+  if (spec.ruleIds.length === 1) {
+    go({ name: 'rule-edit', id: spec.ruleIds[0] });
+    return;
+  }
+  go({ name: 'group-edit', group: key });
+}
+
 async function tapPack(id: string): Promise<void> {
   const rule = ruleById(id);
   if (!rule) return;
-  const on = packIsOn(rule);
-  await applyPack(rule, !on);
+  await applyPack(rule, !packIsOn(rule));
 }
 
 async function tapEthics(rule: Rule): Promise<void> {
@@ -78,7 +93,8 @@ async function onLore(id: string): Promise<void> {
 }
 
 function confirmDelete(p: Profile): void {
-  if (!window.confirm(`删除方案「${p.name}」？`)) return;
+  const extra = p.builtin ? '出厂方案删了以后，可在扩展设置里点「补回出厂方案」。' : '';
+  if (!window.confirm(`删除方案「${p.name}」？${extra}`)) return;
   removeProfile(p.id);
 }
 
@@ -86,6 +102,10 @@ function saveNew(): void {
   const name = window.prompt('给这个方案起个名', '未命名方案');
   if (name == null) return;
   addProfileFromCurrent(name);
+}
+
+function ethicsLabel(name: string): string {
+  return name.replace(/^伦理：/, '');
 }
 </script>
 
@@ -114,37 +134,35 @@ function saveNew(): void {
   <section class="pb-block">
     <h2>方案</h2>
     <p class="pb-hint">点名字立刻套用。点「改」可以开关每一条再保存。</p>
-    <button
-      v-for="p in settings.profiles"
-      :key="p.id"
-      class="pb-row"
-      :class="{ 'is-on': settings.activeProfileId === p.id }"
-      type="button"
-      @click="applyProfile(p)"
-    >
-      <span class="ttl">
-        {{ p.name }}
-        <small>{{ p.kind === 'patch' ? '起步模板，只改列出的条目' : '完整快照' }}</small>
-      </span>
-      <span class="pb-actions" @click.stop>
+    <div v-for="p in settings.profiles" :key="p.id" class="pb-card" :class="{ 'is-on': settings.activeProfileId === p.id }">
+      <button class="pb-card-hit" type="button" @click="applyProfile(p)">
+        <span class="ttl">
+          {{ p.name }}
+          <small>{{ p.kind === 'patch' ? '起步模板，只改列出的条目' : '完整快照' }}</small>
+        </span>
+      </button>
+      <div class="pb-card-ops">
         <button class="pb-btn" type="button" @click="go({ name: 'profile-edit', id: p.id })">改</button>
         <button class="pb-btn ghost" type="button" @click="bindCurrentChat(p.id)">绑</button>
-        <button v-if="!p.builtin" class="pb-btn danger" type="button" @click="confirmDelete(p)">删</button>
-      </span>
-    </button>
+        <button class="pb-btn danger" type="button" @click="confirmDelete(p)">删</button>
+      </div>
+    </div>
+    <p v-if="!settings.profiles.length" class="pb-empty">还没有方案。把现在的开关存一份就行。</p>
     <div class="pb-actions">
       <button class="pb-btn primary" type="button" @click="saveNew">把现在存成方案</button>
     </div>
   </section>
 
   <section class="pb-block">
-    <h2>骨架</h2>
+    <SecHead title="骨架">
+      <EditBtn label="改骨架规则" @click="editSection('skeleton')" />
+    </SecHead>
     <div class="pb-chips">
       <button
         v-for="s in skeletons"
         :key="s.id"
         class="pb-chip"
-        :class="{ 'is-on': ruleById(s.id) ? packIsOn(ruleById(s.id)!) : false }"
+        :class="{ 'is-on': ruleById(s.id) ? packIsOn(ruleById(s.id)!) : false, alert: ruleById(s.id) ? packClash(ruleById(s.id)!) : false }"
         type="button"
         @click="tapPack(s.id)"
       >
@@ -154,7 +172,9 @@ function saveNew(): void {
   </section>
 
   <section class="pb-block">
-    <h2>人设三条</h2>
+    <SecHead title="人设三条">
+      <EditBtn label="改人设三条规则" @click="editSection('persona')" />
+    </SecHead>
     <p class="pb-hint">一般常开。和下面伦理包不是一回事。</p>
     <button
       v-for="n in persona?.entries ?? []"
@@ -170,24 +190,28 @@ function saveNew(): void {
   </section>
 
   <section class="pb-block">
-    <h2>恋爱伦理（选一个）</h2>
+    <SecHead title="恋爱伦理">
+      <EditBtn label="改恋爱伦理规则" @click="editSection('ethics')" />
+    </SecHead>
+    <p class="pb-hint">可以叠着开。打架会在上面标红，你自己决定要不要改规则。</p>
     <div class="pb-chips">
       <button
         v-for="e in ethics"
         :key="e.id"
         class="pb-chip"
-        :class="{ 'is-on': packIsOn(e) }"
+        :class="{ 'is-on': packIsOn(e), alert: packClash(e) }"
         type="button"
         @click="tapEthics(e)"
       >
-        {{ e.name.replace('伦理：', '') }}
+        {{ ethicsLabel(e.name) }}
       </button>
     </div>
-    <p class="pb-hint">点开会按规则开关一组条目。觉得不对就去改规则。</p>
   </section>
 
   <section class="pb-block">
-    <h2>NSFW</h2>
+    <SecHead title="NSFW">
+      <EditBtn label="改 NSFW 规则" @click="editSection('nsfw')" />
+    </SecHead>
     <button class="pb-row" :class="{ 'is-on': nsfw && packIsOn(nsfw) }" type="button" @click="tapNsfw">
       <span class="ttl">
         一键 NSFW
@@ -203,9 +227,6 @@ function saveNew(): void {
         海棠
       </button>
     </div>
-    <button class="pb-btn ghost" type="button" @click="nsfw && go({ name: 'rule-edit', id: nsfw.id })">
-      改 NSFW 开/关时动哪些条目
-    </button>
   </section>
 
   <section class="pb-block">
@@ -231,40 +252,44 @@ function saveNew(): void {
   <section class="pb-block">
     <h2>全局世界书</h2>
     <p class="pb-hint">点一下挂到全局，再点摘掉。可同时挂多本。套用方案默认不会动它们。</p>
-    <button
+    <div
       v-for="s in settings.loreShortcuts"
       :key="s.id"
-      class="pb-row"
+      class="pb-card"
       :class="{ 'is-on': globals.includes(s.worldName) }"
-      type="button"
-      @click="onLore(s.id)"
     >
-      <span class="ttl">
-        {{ s.name }}
-        <small>{{ s.worldName }}</small>
-      </span>
-      <span class="pb-switch" :class="{ 'is-on': globals.includes(s.worldName) }" />
-      <button class="pb-btn ghost" type="button" @click.stop="removeLoreShortcut(s.id)">去掉</button>
-    </button>
+      <button class="pb-card-hit" type="button" @click="onLore(s.id)">
+        <span class="ttl">
+          {{ s.name }}
+          <small>{{ s.worldName }}</small>
+        </span>
+        <span class="pb-switch" :class="{ 'is-on': globals.includes(s.worldName) }" />
+      </button>
+      <div class="pb-card-ops">
+        <button class="pb-btn ghost" type="button" @click="removeLoreShortcut(s.id)">去掉</button>
+      </div>
+    </div>
     <button class="pb-btn" type="button" @click="go({ name: 'lore-pick' })">加入一本</button>
   </section>
 
   <section class="pb-block">
     <h2>我的按钮</h2>
     <p class="pb-hint">自己做一组开关、单选、或一键开一组。</p>
-    <button
-      v-for="r in userMine"
-      :key="r.id"
-      class="pb-row"
-      type="button"
-      @click="r.kind === 'pack' ? applyPack(r, !packIsOn(r)) : go({ name: 'rule-edit', id: r.id })"
-    >
-      <span class="ttl">
-        {{ r.name }}
-        <small>{{ r.kind === 'mutex' ? '只能开一个' : r.kind === 'pack' ? '点一下开一组' : '一组开关' }}</small>
-      </span>
-      <button class="pb-btn" type="button" @click.stop="go({ name: 'rule-edit', id: r.id })">改</button>
-    </button>
+    <div v-for="r in userMine" :key="r.id" class="pb-card">
+      <button
+        class="pb-card-hit"
+        type="button"
+        @click="r.kind === 'pack' ? applyPack(r, !packIsOn(r)) : go({ name: 'rule-edit', id: r.id })"
+      >
+        <span class="ttl">
+          {{ r.name }}
+          <small>{{ r.kind === 'mutex' ? '只能开一个' : r.kind === 'pack' ? '点一下开一组' : '一组开关' }}</small>
+        </span>
+      </button>
+      <div class="pb-card-ops">
+        <button class="pb-btn" type="button" @click="go({ name: 'rule-edit', id: r.id })">改</button>
+      </div>
+    </div>
     <p v-if="!userMine.length" class="pb-empty">还没有自己的组。</p>
     <button class="pb-btn primary" type="button" @click="go({ name: 'rule-create' })">新建一组</button>
   </section>

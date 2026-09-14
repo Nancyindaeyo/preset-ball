@@ -3,6 +3,8 @@ import { isOn, promptRows, settings, toggleName } from '@/state/store';
 import { go } from '@/state/ui';
 import type { PromptRow } from '@/types';
 import { computed, onMounted, ref } from 'vue';
+import EditBtn from '@/ui/EditBtn.vue';
+import SecHead from '@/ui/SecHead.vue';
 
 const q = ref('');
 const rows = ref<PromptRow[]>([]);
@@ -43,7 +45,9 @@ async function tap(row: PromptRow): Promise<void> {
   </label>
 
   <section v-for="m in mutexes" :key="m.id" class="pb-block">
-    <h2>{{ m.name }}</h2>
+    <SecHead :title="m.name">
+      <EditBtn :label="`改 ${m.name}`" @click="go({ name: 'rule-edit', id: m.id, from: { name: 'fine' } })" />
+    </SecHead>
     <p v-if="m.hint" class="pb-hint">{{ m.hint }}</p>
     <div class="pb-chips">
       <button
@@ -52,16 +56,17 @@ async function tap(row: PromptRow): Promise<void> {
         class="pb-chip"
         :class="{ 'is-on': isOn(n) }"
         type="button"
-        @click="toggleName(n, true)"
+        @click="toggleName(n, !isOn(n))"
       >
         {{ n }}
       </button>
     </div>
-    <button class="pb-btn ghost" type="button" @click="go({ name: 'rule-edit', id: m.id })">改这组规则</button>
   </section>
 
   <section v-for="g in groups" :key="g.id" class="pb-block">
-    <h2>{{ g.name }}</h2>
+    <SecHead :title="g.name">
+      <EditBtn :label="`改 ${g.name}`" @click="go({ name: 'rule-edit', id: g.id, from: { name: 'fine' } })" />
+    </SecHead>
     <button
       v-for="n in g.entries"
       :key="n"

@@ -1,5 +1,5 @@
 import App from '@/ui/App.vue';
-import { bootStore, persistSettings, resetAllRules, settings } from '@/state/store';
+import { bootStore, persistSettings, resetAllRules, restoreFactoryProfiles, settings } from '@/state/store';
 import { copyThemeVars, watchTheme } from '@/host/theme';
 import { versionedAssetUrl } from '@/version';
 import { createApp } from 'vue';
@@ -59,6 +59,7 @@ function mountSettings(): void {
       </label>
       <button id="pb-reset-pos" class="menu_button" type="button">重置球的位置</button>
       <button id="pb-reset-rules" class="menu_button" type="button">恢复出厂规则</button>
+      <button id="pb-restore-profiles" class="menu_button" type="button">补回出厂方案</button>
       <p class="opacity50p">方案和规则存在酒馆设置里，可随账号同步。球的位置只存在这台设备。</p>
     </div>
   `;
@@ -76,6 +77,7 @@ function mountSettings(): void {
     window.location.reload();
   });
   box.querySelector('#pb-reset-rules')?.addEventListener('click', () => resetAllRules());
+  box.querySelector('#pb-restore-profiles')?.addEventListener('click', () => restoreFactoryProfiles());
 }
 
 function boot(): void {

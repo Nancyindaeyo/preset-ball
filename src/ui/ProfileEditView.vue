@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { mutexRepair } from '@/catalog/warnings';
 import { snapshotByName } from '@/host/prompts';
 import {
   commitProfileDraft,
   persistSettings,
   promptRows,
+  removeProfile,
   settings,
 } from '@/state/store';
 import { goHome } from '@/state/ui';
@@ -57,16 +57,6 @@ function on(name: string): boolean {
 
 function setOn(row: PromptRow, enabled: boolean): void {
   draft.value = { ...draft.value, [row.name]: enabled };
-  if (!enabled) return;
-  const fakeStates = rows.value.map(r => ({
-    identifier: r.identifier,
-    name: r.name,
-    enabled: r.name === row.name ? true : draft.value[r.name] !== false,
-  }));
-  const extra = mutexRepair(fakeStates, settings.rules, row.name);
-  const next = { ...draft.value };
-  for (const c of extra) next[c.name] = c.enabled;
-  draft.value = next;
 }
 
 async function save(applyNow: boolean): Promise<void> {
@@ -76,6 +66,15 @@ async function save(applyNow: boolean): Promise<void> {
   p.loreWorlds = [...loreWorlds.value];
   persistSettings();
   await commitProfileDraft(p, name.value, draft.value, applyNow);
+  goHome();
+}
+
+function onDelete(): void {
+  const p = profile.value;
+  if (!p) return;
+  const extra = p.builtin ? '出厂方案删了以后，可在扩展设置里点「补回出厂方案」。' : '';
+  if (!window.confirm(`删除方案「${p.name}」？${extra}`)) return;
+  removeProfile(p.id);
   goHome();
 }
 </script>
@@ -136,5 +135,6 @@ async function save(applyNow: boolean): Promise<void> {
       <button class="pb-btn" type="button" @click="save(false)">只保存</button>
       <button class="pb-btn primary" type="button" @click="save(true)">保存并套用</button>
     </div>
+    <button class="pb-btn danger pb-delete" type="button" @click="onDelete">删除这个方案</button>
   </template>
 </template>

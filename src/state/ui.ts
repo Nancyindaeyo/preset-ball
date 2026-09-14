@@ -3,8 +3,9 @@ import { reactive } from 'vue';
 export type View =
   | { name: 'home' }
   | { name: 'profile-edit'; id: string }
-  | { name: 'rule-edit'; id: string }
+  | { name: 'rule-edit'; id: string; from?: View }
   | { name: 'rule-create' }
+  | { name: 'group-edit'; group: string }
   | { name: 'fine' }
   | { name: 'lore-pick' };
 
@@ -29,4 +30,13 @@ export function go(view: View): void {
 
 export function goHome(): void {
   ui.view = { name: 'home' };
+}
+
+export function back(): void {
+  const v = ui.view;
+  if (v.name === 'rule-edit' && v.from) {
+    ui.view = v.from;
+    return;
+  }
+  goHome();
 }

@@ -1,11 +1,72 @@
 import type { NamedState } from '@/host/prompts';
 import { findInStates, normName } from '@/host/prompts';
 import type { Rule, Warning } from '@/types';
+import { HOME_SECTIONS } from './groups';
 import { N, RECEIVERS, SKELETONS, TONES } from './names';
+
+function packLit(rule: Rule, on: (n: string) => boolean): boolean {
+  if (rule.kind !== 'pack' || !rule.on) return false;
+  if (!rule.on.enable.length) return rule.on.disable.every(n => !on(n));
+  return rule.on.enable.every(n => on(n));
+}
+
+function shortRule(name: string): string {
+  return name.replace(/^伦理：/, '').replace(/^骨架：/, '');
+}
+
+function overlapWarnings(statesOn: (n: string) => boolean, rules: Rule[]): Warning[] {
+  const out: Warning[] = [];
+  for (const [key, spec] of Object.entries(HOME_SECTIONS)) {
+    if (spec.ruleIds.length < 2) continue;
+    const members = spec.ruleIds
+      .map(id => rules.find(r => r.id === id))
+      .filter((r): r is Rule => r != null && r.kind === 'pack');
+    const lit = members.filter(r => packLit(r, statesOn));
+    if (lit.length < 2) continue;
+    const clashes: string[] = [];
+    for (let i = 0; i < lit.length; i++) {
+      for (let j = i + 1; j < lit.length; j++) {
+        const a = lit[i];
+        const b = lit[j];
+        const aKillsB = (a.on?.disable ?? []).filter(n => (b.on?.enable ?? []).includes(n));
+        const bKillsA = (b.on?.disable ?? []).filter(n => (a.on?.enable ?? []).includes(n));
+        if (aKillsB.length) {
+          clashes.push(
+            `「${shortRule(a.name)}」要关「${aKillsB.slice(0, 2).join('、')}」，「${shortRule(b.name)}」要开它`,
+          );
+        }
+        if (bKillsA.length) {
+          clashes.push(
+            `「${shortRule(b.name)}」要关「${bKillsA.slice(0, 2).join('、')}」，「${shortRule(a.name)}」要开它`,
+          );
+        }
+      }
+    }
+    const names = lit.map(r => shortRule(r.name)).join('、');
+    const extra = clashes.length ? clashes.slice(0, 2).join('；') + '。' : '出厂规则通常只开一个。';
+    out.push({
+      id: `overlap:${key}`,
+      text: `「${spec.title}」同时亮了${names}。${extra}可以叠，觉得不对就关掉其中一个，或点铅笔改规则。`,
+    });
+  }
+  return out;
+}
 
 export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
   const warnings: Warning[] = [];
   const on = (name: string) => findInStates(states, name)?.enabled === true;
+
+  warnings.push(...overlapWarnings(on, rules));
+
+  for (const rule of rules) {
+    if (!packLit(rule, on) || !rule.on) continue;
+    const leftover = (rule.on.disable ?? []).filter(n => on(n));
+    if (!leftover.length) continue;
+    warnings.push({
+      id: `pack-clash:${rule.id}`,
+      text: `「${shortRule(rule.name)}」亮着，但它要关掉的「${leftover.slice(0, 3).join('、')}${leftover.length > 3 ? '…' : ''}」还开着。可以叠，觉得不对就点铅笔改这条规则。`,
+    });
+  }
 
   for (const rule of rules) {
     if (rule.kind !== 'mutex') continue;
@@ -13,7 +74,7 @@ export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
     if (lit.length > 1) {
       warnings.push({
         id: `mutex:${rule.id}`,
-        text: `「${rule.name}」同时开了 ${lit.length} 条（${lit.slice(0, 3).join('、')}${lit.length > 3 ? '…' : ''}）。同变量只生效后写的那条，请只留一条。`,
+        text: `「${rule.name}」同时开了 ${lit.length} 条（${lit.slice(0, 3).join('、')}${lit.length > 3 ? '…' : ''}）。同变量只生效后写的那条。可以叠，觉得不对就自己关。`,
       });
     }
   }
@@ -22,7 +83,7 @@ export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
   if (skOn.length > 1) {
     warnings.push({
       id: 'skeleton-multi',
-      text: `思维链开了 ${skOn.length} 条。请只留一条，否则会写两遍作文。`,
+      text: `思维链开了 ${skOn.length} 条。会写两遍作文。可以叠，觉得不对就自己关。`,
     });
   }
 
@@ -99,22 +160,4 @@ export function detectWarnings(states: NamedState[], rules: Rule[]): Warning[] {
   void RECEIVERS;
   void normName;
   return warnings;
-}
-
-export function mutexRepair(
-  states: NamedState[],
-  rules: Rule[],
-  justEnabled?: string,
-): Array<{ name: string; enabled: boolean }> {
-  const changes: Array<{ name: string; enabled: boolean }> = [];
-  for (const rule of rules) {
-    if (rule.kind !== 'mutex') continue;
-    const lit = rule.entries.filter(n => findInStates(states, n)?.enabled);
-    if (lit.length <= 1) continue;
-    const keep = justEnabled && lit.includes(justEnabled) ? justEnabled : lit[lit.length - 1];
-    for (const n of lit) {
-      if (n !== keep) changes.push({ name: n, enabled: false });
-    }
-  }
-  return changes;
 }

@@ -1,7 +1,7 @@
 import { FACTORY_PROFILES, FACTORY_RULES, JAILBREAK_TIERS } from '@/catalog/factory';
 import { folderOf, isDivider, isReceiver, isSystemName } from '@/catalog/folders';
 import { N, NSFW_STYLES } from '@/catalog/names';
-import { detectWarnings, mutexRepair } from '@/catalog/warnings';
+import { detectWarnings } from '@/catalog/warnings';
 import { getContext, toast } from '@/host/context';
 import { onHostEvent } from '@/host/events';
 import {
@@ -33,6 +33,7 @@ const DEFAULT: Settings = {
   profiles: structuredClone(FACTORY_PROFILES),
   rules: structuredClone(FACTORY_RULES),
   loreShortcuts: [],
+  exclusiveGroups: {},
 };
 
 export const settings = reactive<Settings>(structuredClone(DEFAULT));
@@ -58,12 +59,8 @@ function mergeFactory(stored: Partial<Settings> | undefined): Settings {
   if (typeof stored.activeProfileId === 'string' || stored.activeProfileId === null) {
     base.activeProfileId = stored.activeProfileId ?? null;
   }
-  if (Array.isArray(stored.profiles) && stored.profiles.length) {
+  if (Array.isArray(stored.profiles)) {
     base.profiles = stored.profiles as Profile[];
-    const have = new Set(base.profiles.map(p => p.builtin).filter(Boolean));
-    for (const fp of FACTORY_PROFILES) {
-      if (fp.builtin && !have.has(fp.builtin)) base.profiles.push(clone(fp));
-    }
   }
   const storedRules = Array.isArray(stored.rules) ? (stored.rules as Rule[]) : [];
   const byBuiltin = new Map(storedRules.filter(r => r.builtin).map(r => [r.builtin, r]));
@@ -73,6 +70,9 @@ function mergeFactory(stored: Partial<Settings> | undefined): Settings {
     ...userRules,
   ];
   if (Array.isArray(stored.loreShortcuts)) base.loreShortcuts = stored.loreShortcuts as LoreShortcut[];
+  if (stored.exclusiveGroups && typeof stored.exclusiveGroups === 'object') {
+    base.exclusiveGroups = { ...(stored.exclusiveGroups as Record<string, boolean>) };
+  }
   return base;
 }
 
@@ -98,6 +98,12 @@ export async function refreshStates(): Promise<void> {
   warnings.value = detectWarnings(states.value, settings.rules);
 }
 
+function lastWins(changes: Array<{ name: string; enabled: boolean }>): Array<{ name: string; enabled: boolean }> {
+  const map = new Map<string, boolean>();
+  for (const c of changes) map.set(c.name, c.enabled);
+  return [...map.entries()].map(([name, enabled]) => ({ name, enabled }));
+}
+
 function onMap(): Map<string, boolean> {
   return new Map(states.value.map(s => [s.name, s.enabled]));
 }
@@ -117,9 +123,7 @@ export async function setNames(changes: Array<{ name: string; enabled: boolean }
 }
 
 export async function toggleName(name: string, enabled: boolean): Promise<void> {
-  const extra = mutexRepair(states.value, settings.rules, enabled ? name : undefined);
-  const changes = [{ name, enabled }, ...extra.filter(c => c.name !== name)];
-  await setNames(changes);
+  await setNames([{ name, enabled }]);
 }
 
 function flattenPack(rule: Rule, turnOn: boolean): Array<{ name: string; enabled: boolean }> {
@@ -147,13 +151,33 @@ export function packIsOn(rule: Rule): boolean {
   if (!rule.on.enable.length) {
     return rule.on.disable.every(n => !isOn(n));
   }
-  const enablesOn = rule.on.enable.every(n => isOn(n));
-  const disablesOff = (rule.on.disable ?? []).every(n => !isOn(n));
-  return enablesOn && disablesOff;
+  return rule.on.enable.every(n => isOn(n));
+}
+
+/** 这个包亮着，但它要关掉的条目还开着（多半是和别的包叠上了） */
+export function packClash(rule: Rule): boolean {
+  if (!packIsOn(rule) || !rule.on) return false;
+  return (rule.on.disable ?? []).some(n => isOn(n));
+}
+
+function groupIsExclusive(rule: Rule): boolean {
+  const key = rule.packGroup;
+  if (!key) return false;
+  return settings.exclusiveGroups?.[key] === true;
 }
 
 export async function applyPack(rule: Rule, turnOn: boolean): Promise<void> {
-  let changes = flattenPack(rule, turnOn);
+  let changes: Array<{ name: string; enabled: boolean }> = [];
+  if (turnOn && groupIsExclusive(rule) && rule.packGroup) {
+    const keep = new Set(rule.on?.enable ?? []);
+    for (const other of settings.rules) {
+      if (other.packGroup !== rule.packGroup || other.id === rule.id || other.kind !== 'pack') continue;
+      for (const n of other.on?.enable ?? []) {
+        if (!keep.has(n)) changes.push({ name: n, enabled: false });
+      }
+    }
+  }
+  changes = changes.concat(flattenPack(rule, turnOn));
   if (rule.id === 'pack-nsfw' && turnOn) {
     if (settings.nsfwStyle === 'haitang') {
       changes.push({ name: N.nsfwHaitang, enabled: true }, { name: N.nsfwWeimei, enabled: false });
@@ -161,14 +185,7 @@ export async function applyPack(rule: Rule, turnOn: boolean): Promise<void> {
       changes.push({ name: N.nsfwWeimei, enabled: true }, { name: N.nsfwHaitang, enabled: false });
     }
   }
-  if (rule.packGroup && turnOn) {
-    for (const other of settings.rules) {
-      if (other.packGroup === rule.packGroup && other.id !== rule.id && other.kind === 'pack') {
-        changes = changes.concat(flattenPack(other, false));
-      }
-    }
-  }
-  await setNames(changes);
+  await setNames(lastWins(changes));
 }
 
 export async function applyProfile(profile: Profile, opts?: { skipLore?: boolean }): Promise<void> {
@@ -239,7 +256,22 @@ export function removeProfile(id: string): void {
   if (i < 0) return;
   settings.profiles.splice(i, 1);
   if (settings.activeProfileId === id) settings.activeProfileId = null;
+  const bind = readBinding();
+  if (bind?.profileId === id) writeBinding(null);
   persistSettings();
+}
+
+export function restoreFactoryProfiles(): void {
+  const have = new Set(settings.profiles.map(p => p.builtin).filter(Boolean));
+  let added = 0;
+  for (const fp of FACTORY_PROFILES) {
+    if (fp.builtin && !have.has(fp.builtin)) {
+      settings.profiles.unshift(clone(fp));
+      added += 1;
+    }
+  }
+  persistSettings();
+  toast(added ? 'ok' : 'info', added ? `已补回 ${added} 个出厂方案` : '出厂方案都在，不用补');
 }
 
 export function renameProfile(id: string, name: string): void {

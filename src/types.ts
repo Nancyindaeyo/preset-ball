@@ -22,7 +22,7 @@ export interface Rule {
   off?: PackSide;
   /** 破限档位：1 起步，数字越大药越重 */
   level?: number;
-  /** 互斥包组，同组 pack 只能亮一个（伦理四包） */
+  /** 仅作分组标签（伦理 / 骨架），默认不互斥，冲突用标红提示 */
   packGroup?: string;
 }
 
@@ -65,7 +65,8 @@ export interface Settings {
   profiles: Profile[];
   rules: Rule[];
   loreShortcuts: LoreShortcut[];
-  /** 用户改过出厂规则后，仍可用 builtin id 恢复 */
+  /** 用户主动打开「只能选一个」的分组。默认都可以叠。 */
+  exclusiveGroups: Record<string, boolean>;
 }
 
 export interface ChatBinding {
