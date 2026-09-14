@@ -116,7 +116,7 @@ export const FACTORY_RULES: Rule[] = [
   mutex('mutex-tone', '小说基调', TONES, '同人用泡泡宇宙；原创不要留着同人基调。'),
   mutex('mutex-style', '文风', STYLES, '只开一个。'),
   mutex('mutex-psy', '心理活动颜色', PSY),
-  mutex('mutex-nsfw-style', 'NSFW 文笔', NSFW_STYLES, '海棠和唯美同变量，只能留一个。', 'fine'),
+  mutex('mutex-nsfw-style', 'NSFW 文笔', NSFW_STYLES, '海棠和唯美同变量，只能留一个。', 'quick'),
   mutex('mutex-nsfw-patch', 'NSFW 性向补丁', NSFW_PATCHES),
   mutex('mutex-small-cot', '正文小 CoT', SMALL_COT, '和长思维链同开会写两遍。Gemini 默认全关。'),
   mutex('mutex-body-len', '正文长短', BODY_LEN),

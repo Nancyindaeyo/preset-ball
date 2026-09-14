@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isOn, mothra, promptRows, settings, toggleMutex, toggleName } from '@/state/store';
+import { isOn, mothra, promptRows, ruleForCurrentPreset, settings, toggleMutex, toggleName } from '@/state/store';
 import { go } from '@/state/ui';
 import type { PromptRow } from '@/types';
 import { computed, onMounted, ref } from 'vue';
@@ -30,10 +30,12 @@ const folders = computed(() => {
 });
 
 const mutexes = computed(() =>
-  settings.rules.filter(r => r.kind === 'mutex' && r.entries.some(n => present.value.has(n))),
+  settings.rules.filter(r => r.kind === 'mutex' && ruleForCurrentPreset(r) && r.entries.some(n => present.value.has(n))),
 );
 const groups = computed(() =>
-  settings.rules.filter(r => r.kind === 'group' && r.section !== 'quick' && r.entries.some(n => present.value.has(n))),
+  settings.rules.filter(
+    r => r.kind === 'group' && r.section !== 'quick' && ruleForCurrentPreset(r) && r.entries.some(n => present.value.has(n)),
+  ),
 );
 
 async function tap(row: PromptRow): Promise<void> {

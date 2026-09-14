@@ -6,7 +6,7 @@ import {
   currentProfile,
   dirty,
   getGlobalWorlds,
-  hasFineLayout,
+  homeShortcutRules,
   mothra,
   pullFromHost,
   presetKey,
@@ -21,7 +21,7 @@ import {
   warnings,
 } from '@/state/store';
 import { askConfirm, go } from '@/state/ui';
-import type { Profile, Rule } from '@/types';
+import type { Profile } from '@/types';
 import { computed, onMounted, ref } from 'vue';
 import RuleCard from '@/ui/RuleCard.vue';
 
@@ -30,7 +30,7 @@ const bind = computed(() => readBinding());
 const boundProfile = computed(() => settings.profiles.find(p => p.id === bind.value?.profileId) ?? null);
 const active = computed(() => currentProfile());
 const unsaved = computed(() => dirty.value || schemeDirty.value);
-const homeRules = computed(() => settings.rules.filter((r): r is Rule => r.section !== 'fine'));
+const homeRules = computed(() => homeShortcutRules());
 
 onMounted(async () => {
   globals.value = await getGlobalWorlds();
@@ -76,8 +76,7 @@ function saveNew(): void {
 
 async function openFine(): Promise<void> {
   if (!presetKey.value) await pullFromHost();
-  if (!mothra.value && !hasFineLayout()) go({ name: 'group-setup' });
-  else go({ name: 'fine' });
+  go({ name: 'fine' });
 }
 </script>
 
@@ -132,9 +131,9 @@ async function openFine(): Promise<void> {
 
   <section class="pb-block">
     <h2>快捷</h2>
-    <p class="pb-hint">蛾摩拉的一键和破限在这里。箭头打开抽屉改条目。整块都能删，也可以自己再新建。</p>
+    <p class="pb-hint">{{ mothra ? '蛾摩拉的一键和破限跟这份预设走。箭头打开抽屉。也可以自己再建。' : '这份预设还没有快捷组。自己新建，或直接去细调。' }}</p>
     <RuleCard v-for="r in homeRules" :key="r.id" :rule="r" />
-    <p v-if="!homeRules.length" class="pb-empty">快捷是空的。下面新建一组。</p>
+    <p v-if="!homeRules.length" class="pb-empty">{{ mothra ? '快捷是空的。下面新建一组。' : '换预设后快捷是空的。直接去细调，或在这里给这份预设建组。' }}</p>
     <button class="pb-btn primary" type="button" @click="go({ name: 'rule-create' })">新建一组</button>
   </section>
 
@@ -163,7 +162,7 @@ async function openFine(): Promise<void> {
 
   <section class="pb-block">
     <h2>细调</h2>
-    <p class="pb-hint">{{ mothra ? '按蛾摩拉文件夹改每一条。' : '其他预设先自己分组，之后就和细调一样用。' }}</p>
+    <p class="pb-hint">{{ mothra ? '按蛾摩拉文件夹改每一条。' : '直接改当前预设的每一条。也可以在上面给这份预设建快捷组。' }}</p>
     <button class="pb-btn" type="button" @click="openFine">打开全部条目</button>
   </section>
 </template>

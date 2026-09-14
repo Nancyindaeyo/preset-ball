@@ -116,6 +116,7 @@ function save(): void {
     section: src.value?.section ?? 'mine',
     hint: hint.value.trim() || undefined,
     packGroup: src.value?.packGroup,
+    presetKey: src.value?.builtin ? src.value.presetKey : src.value?.presetKey || undefined,
     entries: kind.value === 'pack' || kind.value === 'ladder' ? [] : [...picked.value],
     on: kind.value === 'pack' ? { enable: [...onSide.enable], disable: [...onSide.disable] } : undefined,
     off,

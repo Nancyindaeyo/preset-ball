@@ -9,8 +9,6 @@ import {
   removeRule,
   removeRuleEntry,
   setLadderLevel,
-  setNsfwStyle,
-  settings,
   toggleMutex,
   toggleName,
 } from '@/state/store';
@@ -122,15 +120,6 @@ async function tapTier(i: number): Promise<void> {
         @click="tapTier(i)"
       >
         {{ i + 1 }} {{ t.name }}
-      </button>
-    </div>
-
-    <div v-if="rule.id === 'pack-nsfw'" class="pb-chips pb-rule-chips">
-      <button class="pb-chip" :class="{ 'is-on': settings.nsfwStyle === 'weimei' }" type="button" @click="setNsfwStyle('weimei')">
-        唯美
-      </button>
-      <button class="pb-chip" :class="{ 'is-on': settings.nsfwStyle === 'haitang' }" type="button" @click="setNsfwStyle('haitang')">
-        海棠
       </button>
     </div>
 

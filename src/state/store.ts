@@ -138,9 +138,32 @@ export async function pullFromHost(): Promise<void> {
   states.value = await getNamedStates();
   presetKey.value = await getPresetLabel(states.value);
   mothra.value = isMothraPreset(states.value);
+  bindUntaggedRulesToPreset();
   refreshWarnings();
   rememberBaseline();
   schemeDirty.value = false;
+}
+
+function bindUntaggedRulesToPreset(): void {
+  if (!presetKey.value) return;
+  let changed = false;
+  for (const r of settings.rules) {
+    if (r.builtin || r.presetKey) continue;
+    r.presetKey = presetKey.value;
+    changed = true;
+  }
+  if (changed) persistSettings();
+}
+
+/** 出厂蛾摩拉规则只在蛾摩拉显示；自己建的组跟当前预设走 */
+export function ruleForCurrentPreset(rule: Rule): boolean {
+  if (rule.presetKey) return rule.presetKey === presetKey.value;
+  if (rule.builtin) return mothra.value;
+  return true;
+}
+
+export function homeShortcutRules(): Rule[] {
+  return settings.rules.filter(r => r.section !== 'fine' && ruleForCurrentPreset(r));
 }
 
 export async function refreshStates(): Promise<void> {
@@ -446,6 +469,7 @@ export async function commitProfileDraft(
 }
 
 export function upsertRule(rule: Rule): void {
+  if (!rule.builtin) rule.presetKey = rule.presetKey || presetKey.value || undefined;
   const i = settings.rules.findIndex(r => r.id === rule.id);
   if (i >= 0) settings.rules[i] = rule;
   else settings.rules.push(rule);

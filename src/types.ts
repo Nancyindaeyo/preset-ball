@@ -30,6 +30,8 @@ export interface Rule {
   tiers?: LadderTier[];
   /** 仅作分组标签，默认不互斥，冲突用标红提示 */
   packGroup?: string;
+  /** 绑在哪个预设的快捷上。出厂蛾摩拉规则没有这个字段，只在蛾摩拉显示 */
+  presetKey?: string;
 }
 
 export type ProfileKind = 'patch' | 'full';
