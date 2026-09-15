@@ -686,9 +686,21 @@ export function removeRuleEntry(rule: Rule, name: string): void {
 export { getGlobalWorlds, listWorldNames, persistSettings };
 
 let lastChat = '';
+let stopHostEvents: (() => void) | undefined;
+let boundApplyTimer = 0;
+
+export function unbindHostEvents(): void {
+  stopHostEvents?.();
+  stopHostEvents = undefined;
+  if (boundApplyTimer) {
+    window.clearTimeout(boundApplyTimer);
+    boundApplyTimer = 0;
+  }
+}
 
 export function bindHostEvents(): void {
-  onHostEvent('CHAT_CHANGED', () => {
+  unbindHostEvents();
+  stopHostEvents = onHostEvent('CHAT_CHANGED', () => {
     const id = getContext()?.getCurrentChatId?.() ?? '';
     if (id === lastChat) return;
     lastChat = id;
@@ -696,10 +708,18 @@ export function bindHostEvents(): void {
   });
 }
 
+function scheduleBoundApply(): void {
+  if (boundApplyTimer) window.clearTimeout(boundApplyTimer);
+  boundApplyTimer = window.setTimeout(() => {
+    boundApplyTimer = 0;
+    void applyBoundIfAny();
+  }, 0);
+}
+
 export async function bootStore(): Promise<void> {
   hydrateSettings();
   lastChat = getContext()?.getCurrentChatId?.() ?? '';
   bindHostEvents();
-  await applyBoundIfAny();
+  scheduleBoundApply();
   ready.value = true;
 }

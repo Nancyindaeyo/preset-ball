@@ -53,7 +53,7 @@ function on(name: string): boolean {
 }
 
 function setOn(row: PromptRow, enabled: boolean): void {
-  draft.value = { ...draft.value, [row.name]: enabled };
+  draft.value[row.name] = enabled;
 }
 
 async function save(applyNow: boolean): Promise<void> {

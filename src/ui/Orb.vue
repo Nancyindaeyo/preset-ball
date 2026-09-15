@@ -97,7 +97,7 @@ onUnmounted(() => window.removeEventListener('resize', onResize));
 
 <template>
   <button
-    v-show="settings.orbEnabled"
+    v-if="settings.orbEnabled"
     class="pb-orb"
     :class="{ 'is-dock': pos.dock !== 'none', 'is-awake': awake || ui.sheet }"
     :style="{ left: `${leftPx()}px`, top: `${pos.y}px` }"

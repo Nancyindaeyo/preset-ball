@@ -27,12 +27,19 @@ export function copyThemeVars(target: HTMLElement): void {
 
 export function watchTheme(target: HTMLElement): () => void {
   copyThemeVars(target);
-  const mo = new MutationObserver(() => copyThemeVars(target));
+  let raf = 0;
+  const schedule = (): void => {
+    if (raf) return;
+    raf = window.requestAnimationFrame(() => {
+      raf = 0;
+      copyThemeVars(target);
+    });
+  };
+  const mo = new MutationObserver(schedule);
   mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] });
   mo.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
-  const poll = window.setInterval(() => copyThemeVars(target), 4000);
   return () => {
     mo.disconnect();
-    window.clearInterval(poll);
+    if (raf) window.cancelAnimationFrame(raf);
   };
 }

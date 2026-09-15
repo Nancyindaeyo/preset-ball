@@ -1,22 +1,68 @@
 import App from '@/ui/App.vue';
-import { bootStore, persistSettings, resetAllRules, restoreFactoryProfiles, settings } from '@/state/store';
+import {
+  bootStore,
+  persistSettings,
+  resetAllRules,
+  restoreFactoryProfiles,
+  settings,
+  unbindHostEvents,
+} from '@/state/store';
 import { copyThemeVars, watchTheme } from '@/host/theme';
 import { versionedAssetUrl } from '@/version';
-import { createApp } from 'vue';
+import { createApp, type App as VueApp } from 'vue';
 import '@/styles.css';
 
 const HOST_ID = 'preset-ball-host';
 const SETTINGS_ID = 'preset-ball-settings';
+/** 热重载会再执行一遍模块，旧闭包够不到；挂到 window 才能拆掉上一份监听。 */
+const CLEANUP_KEY = '__presetBallCleanup';
+const SETTINGS_TRIES = 40;
+
+type CleanupFn = () => void;
+
+let app: VueApp | undefined;
+let stopTheme: (() => void) | undefined;
+let settingsTimer = 0;
+let settingsTries = 0;
+
+function previousCleanup(): CleanupFn | undefined {
+  const fn = (window as unknown as Record<string, unknown>)[CLEANUP_KEY];
+  return typeof fn === 'function' ? (fn as CleanupFn) : undefined;
+}
+
+function registerCleanup(fn: CleanupFn): void {
+  (window as unknown as Record<string, unknown>)[CLEANUP_KEY] = fn;
+}
+
+function disposeRuntime(): void {
+  if (settingsTimer) {
+    window.clearTimeout(settingsTimer);
+    settingsTimer = 0;
+  }
+  window.removeEventListener('pagehide', disposeRuntime);
+  stopTheme?.();
+  stopTheme = undefined;
+  app?.unmount();
+  app = undefined;
+  document.getElementById(HOST_ID)?.remove();
+  unbindHostEvents();
+  if (previousCleanup() === disposeRuntime) {
+    delete (window as unknown as Record<string, unknown>)[CLEANUP_KEY];
+  }
+}
 
 function mountUi(): void {
   document.getElementById(HOST_ID)?.remove();
+  stopTheme?.();
+  app?.unmount();
+
   const host = document.createElement('div');
   host.id = HOST_ID;
   host.style.cssText = 'position:static;';
   document.body.appendChild(host);
   const shadow = host.attachShadow({ mode: 'open' });
   copyThemeVars(host);
-  const stopTheme = watchTheme(host);
+  stopTheme = watchTheme(host);
 
   const link = document.createElement('link');
   link.rel = 'stylesheet';
@@ -25,13 +71,16 @@ function mountUi(): void {
 
   const root = document.createElement('div');
   shadow.appendChild(root);
-  const app = createApp(App);
+  app = createApp(App);
   app.mount(root);
+}
 
-  window.addEventListener('pagehide', () => {
-    stopTheme();
-    app.unmount();
-  });
+function unmountUi(): void {
+  stopTheme?.();
+  stopTheme = undefined;
+  app?.unmount();
+  app = undefined;
+  document.getElementById(HOST_ID)?.remove();
 }
 
 function mountSettings(): void {
@@ -40,9 +89,12 @@ function mountSettings(): void {
     document.querySelector('#extensions_settings2') ||
     document.querySelector('.extensions_settings');
   if (!host) {
-    window.setTimeout(mountSettings, 400);
+    if (settingsTries >= SETTINGS_TRIES) return;
+    settingsTries += 1;
+    settingsTimer = window.setTimeout(mountSettings, 400);
     return;
   }
+  settingsTries = 0;
   document.getElementById(SETTINGS_ID)?.remove();
   const box = document.createElement('div');
   box.id = SETTINGS_ID;
@@ -70,6 +122,8 @@ function mountSettings(): void {
     boxEl.addEventListener('change', () => {
       settings.orbEnabled = boxEl.checked;
       persistSettings();
+      if (settings.orbEnabled) mountUi();
+      else unmountUi();
     });
   }
   box.querySelector('#pb-reset-pos')?.addEventListener('click', () => {
@@ -81,9 +135,12 @@ function mountSettings(): void {
 }
 
 function boot(): void {
+  previousCleanup()?.();
+  registerCleanup(disposeRuntime);
+  window.addEventListener('pagehide', disposeRuntime);
   void bootStore()
     .then(() => {
-      mountUi();
+      if (settings.orbEnabled) mountUi();
       mountSettings();
     })
     .catch(err => {

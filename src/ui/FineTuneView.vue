@@ -40,7 +40,6 @@ const groups = computed(() =>
 
 async function tap(row: PromptRow): Promise<void> {
   await toggleName(row.name, !isOn(row.name));
-  rows.value = await promptRows();
 }
 </script>
 
